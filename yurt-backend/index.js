@@ -42,7 +42,7 @@ require("dotenv").config();
 // Her route dosyası belirli bir işlev grubunun API endpoint'lerini içerir.
 // Modüler yapı sayesinde kod düzenli ve bakımı kolay olur.
 const authRoutes         = require("./routes/authRoutes");         // Login, şifre değiştirme
-const adminRoutes        = require("./routes/adminRoutes");        // Admin: kullanıcı yönetimi
+const adminRoutes        = require("./routes/adminRoutes");        // Admin: kullanıcı yönetimi işlemleri
 const userRoutes         = require("./routes/userRoutes");         // Profil bilgileri
 const mailRoutes         = require("./routes/mailRoutes");         // Email doğrulama, şifre sıfırlama
 const roomRoutes         = require("./routes/roomRoutes");         // Oda & bina yönetimi
