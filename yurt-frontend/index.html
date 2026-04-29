@@ -1,0 +1,688 @@
+<!--
+  ╔══════════════════════════════════════════════════════════════╗
+  ║        GİRİŞ SAYFASI — YURT YÖNETİM SİSTEMİ               ║
+  ╠══════════════════════════════════════════════════════════════╣
+  ║  Bu dosya yurt yönetim sisteminin GİRİŞ (LOGIN) sayfasıdır.║
+  ║  Kullanıcı email + şifre girerek sisteme giriş yapar.      ║
+  ║                                                              ║
+  ║  AKIŞ:                                                       ║
+  ║  1. Kullanıcı email ve şifresini girer                      ║
+  ║  2. Backend'e POST /login isteği gönderilir                 ║
+  ║  3. Doğruysa JWT token döner → localStorage'a kaydedilir    ║
+  ║  4. Kullanıcı rolüne (user_type) göre yönlendirilir:       ║
+  ║     • Öğrenci → student-panel.html                          ║
+  ║     • Yönetici / Admin / SuperAdmin → admin-panel.html      ║
+  ║     • Güvenlik / Bakım / Temizlik → admin-panel.html        ║
+  ║                                                              ║
+  ║  OTOMATİK YÖNLENDİRME:                                      ║
+  ║  Sayfa açıldığında localStorage'da token varsa,              ║
+  ║  /profile endpoint'ine istek yaparak token geçerliliğini     ║
+  ║  kontrol eder. Geçerliyse tekrar giriş yapmadan yönlendirir.║
+  ╚══════════════════════════════════════════════════════════════╝
+-->
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Giriş — Yurt Yönetim Sistemi</title>
+  <script>(function(){var t=localStorage.getItem('theme')||'light';document.documentElement.setAttribute('data-theme',t);})();</script>
+<style>
+/*
+  ══════════════════════════════════════════════════════════════
+  CSS STİLLERİ — GİRİŞ SAYFASI
+  ══════════════════════════════════════════════════════════════
+  Bu sayfa diğer panellerden farklı olarak tek bir login kutusu içerir.
+  Sayfa ortasında cam efektli (glassmorphism) bir kart gösterir.
+*/
+
+/* ─────────────────────────────────────────────
+   1) TEMEL SIFIRLAMA
+   ─────────────────────────────────────────────
+*/
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #f0f4ff;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow: hidden;
+}
+
+/* ─────────────────────────────────────────────
+   2) CANLI ARKA PLAN — 4 küre + yıldız parçacıkları
+   ─────────────────────────────────────────────
+   Login sayfasında 4 renkli küre kullanılır (panellerde 3).
+   Ek olarak .particles katmanı ile minik yıldızlar oluşturulur.
+*/
+.live-bg {
+  position: fixed; inset: 0; z-index: 0; overflow: hidden;
+  background: linear-gradient(135deg, #ede9fe 0%, #e0f2fe 50%, #fdf4ff 100%);
+}
+.live-bg .orb {
+  position: absolute; border-radius: 50%; filter: blur(110px);
+  animation: orbFloat 20s ease-in-out infinite; opacity: 0.60;
+}
+.live-bg .orb:nth-child(1) {
+  width: 600px; height: 600px; top: -10%; left: -5%;
+  background: radial-gradient(circle, #c4b5fd, transparent 70%);
+  animation-duration: 22s;
+}
+.live-bg .orb:nth-child(2) {
+  width: 500px; height: 500px; top: 50%; right: -8%;
+  background: radial-gradient(circle, #a5f3fc, transparent 70%);
+  animation-duration: 18s; animation-delay: -5s;
+}
+.live-bg .orb:nth-child(3) {
+  width: 400px; height: 400px; bottom: -5%; left: 30%;
+  background: radial-gradient(circle, #f9a8d4, transparent 70%);
+  animation-duration: 25s; animation-delay: -10s;
+}
+.live-bg .orb:nth-child(4) {
+  width: 280px; height: 280px; top: 30%; left: 50%;
+  background: radial-gradient(circle, #fde68a, transparent 70%);
+  animation-duration: 30s; animation-delay: -15s; opacity: 0.45;
+}
+
+/* Minik yıldız parçacıkları — radial-gradient ile nokta deseni */
+.live-bg .particles {
+  position: absolute; inset: 0;
+  background-image:
+    radial-gradient(2px 2px at 10% 20%, rgba(99,102,241,0.35) 0%, transparent 100%),
+    radial-gradient(2px 2px at 80% 10%, rgba(139,92,246,0.30) 0%, transparent 100%),
+    radial-gradient(3px 3px at 30% 70%, rgba(6,182,212,0.25) 0%, transparent 100%),
+    radial-gradient(2px 2px at 60% 50%, rgba(99,102,241,0.30) 0%, transparent 100%),
+    radial-gradient(2px 2px at 90% 80%, rgba(249,168,212,0.35) 0%, transparent 100%),
+    radial-gradient(3px 3px at 50% 30%, rgba(139,92,246,0.20) 0%, transparent 100%),
+    radial-gradient(2px 2px at 20% 90%, rgba(6,182,212,0.25) 0%, transparent 100%),
+    radial-gradient(2px 2px at 75% 60%, rgba(99,102,241,0.20) 0%, transparent 100%),
+    radial-gradient(2px 2px at 40% 15%, rgba(249,168,212,0.30) 0%, transparent 100%);
+  animation: particleDrift 60s linear infinite;
+}
+
+/* Küre hareketi */
+@keyframes orbFloat {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25%      { transform: translate(40px, -30px) scale(1.05); }
+  50%      { transform: translate(-20px, 40px) scale(0.95); }
+  75%      { transform: translate(30px, 20px) scale(1.02); }
+}
+/* Parçacık kayma animasyonu */
+@keyframes particleDrift {
+  0%   { transform: translateY(0); }
+  100% { transform: translateY(-100px); }
+}
+
+/* ─────────────────────────────────────────────
+   3) GİRİŞ KUTUSU — Glassmorphism kartı
+   ─────────────────────────────────────────────
+   backdrop-filter: blur → Arkasındaki arka planı bulanıklaştırır.
+   Bu "cam efekti" modern web tasarımının popüler tekniğidir.
+*/
+.login-container {
+  background: rgba(255,255,255,.90);
+  border-radius: 20px;
+  box-shadow: 0 24px 64px rgba(99,102,241,.15), 0 0 0 1px rgba(99,102,241,.1);
+  width: 100%; max-width: 420px;
+  overflow: hidden;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(99,102,241,.15);
+  position: relative; z-index: 1;
+}
+
+/* Üst kısım — Mor gradient başlık */
+.login-header {
+  background: linear-gradient(135deg, rgba(99,102,241,.15), rgba(139,92,246,.1));
+  padding: 32px 32px 28px;
+  text-align: center;
+  border-bottom: 1px solid rgba(99,102,241,.1);
+}
+.login-header h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; color: #1e293b; }
+.login-header p  { font-size: 14px; opacity: 0.75; color: #4338ca; }
+/* Üniversite logosu — yuvarlak, hafif parlama efekti */
+.login-header .logo {
+  margin-bottom: 14px;
+}
+.login-header .logo img {
+  width: 72px; height: 72px;
+  border-radius: 50%;          /* Yuvarlak görünüm */
+  object-fit: cover;           /* Oranı bozmadan sığdır */
+  border: 2px solid rgba(99,102,241,0.3);
+  box-shadow: 0 0 20px rgba(99,102,241,0.25); /* Hafif mor parlama */
+}
+
+/* Form alanı */
+.login-body { padding: 32px; }
+
+/* Form grubu — label + input */
+.form-group { margin-bottom: 20px; }
+.form-group label {
+  display: block; font-size: 13px; font-weight: 600;
+  color: #64748b; margin-bottom: 6px;
+}
+
+/* Input stili — koyu arka plan, mor odak kenarlığı */
+.form-control {
+  width: 100%; padding: 12px 16px;
+  border: 1.5px solid rgba(99,102,241,.2);
+  border-radius: 10px; font-size: 14px;
+  transition: all 0.2s;
+  background: rgba(248,247,255,.85); color: #1e293b;
+}
+.form-control::placeholder { color: #94a3b8; }
+.form-control:focus {
+  outline: none; border-color: #6366f1;
+  background: rgba(248,247,255,1);
+  box-shadow: 0 0 0 3px rgba(99,102,241,.12);
+}
+
+/* Giriş butonu — mor gradient */
+.btn-login {
+  width: 100%; padding: 13px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff; border: none; border-radius: 10px;
+  font-size: 15px; font-weight: 600; cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(99,102,241,0.3);
+}
+.btn-login:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(99,102,241,0.45); }
+.btn-login:active { transform: translateY(0); }
+.btn-login:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
+
+/* Hata ve başarı mesaj kutuları */
+.msg {
+  padding: 12px 16px; border-radius: 8px;
+  font-size: 13px; margin-bottom: 16px; display: none; /* Varsayılan: gizli */
+}
+.msg-error   { background: rgba(239,68,68,.08);  color: #dc2626; border: 1px solid rgba(239,68,68,.2); }
+.msg-success { background: rgba(16,185,129,.08); color: #059669; border: 1px solid rgba(16,185,129,.2); }
+
+/* Alt kısım — "Şifremi Unuttum" linki */
+.login-footer {
+  padding: 16px 32px; border-top: 1px solid rgba(99,102,241,.1);
+  text-align: center; background: rgba(248,247,255,.6);
+}
+.login-footer a { color: #6366f1; font-size: 13px; text-decoration: none; }
+.login-footer a:hover { text-decoration: underline; color: #4338ca; }
+
+/* Rol bilgi kutusu — Hangi rolle nereye yönlendirilir bilgisi */
+.role-info {
+  margin-top: 16px; padding: 12px 16px;
+  background: rgba(99,102,241,.06);
+  border-radius: 8px; border: 1px solid rgba(99,102,241,.12);
+}
+.role-info p { font-size: 12px; color: #64748b; line-height: 1.6; }
+.role-info strong { color: #4338ca; }
+
+/* ─────────────────────────────────────────────
+   4) SCROLLBAR STİLİ
+   ─────────────────────────────────────────────
+*/
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.25); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,0.4); }
+
+/* ─────────────────────────────────────────────
+   5) ŞİFREMİ UNUTTUM MODAL
+   ─────────────────────────────────────────────
+*/
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,0.65);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px; opacity: 0; pointer-events: none;
+  transition: opacity 0.2s;
+}
+.modal-overlay.open { opacity: 1; pointer-events: all; }
+.modal-box {
+  background: rgba(255,255,255,.97);
+  border: 1px solid rgba(99,102,241,.15);
+  border-radius: 20px;
+  width: 100%; max-width: 400px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 24px 60px rgba(99,102,241,.15);
+  overflow: hidden;
+}
+.modal-head {
+  background: linear-gradient(135deg, rgba(99,102,241,0.3), rgba(139,92,246,0.25));
+  padding: 22px 28px 18px;
+  border-bottom: 1px solid rgba(99,102,241,0.15);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.modal-head h3 { font-size: 16px; font-weight: 700; color: #1e293b; margin: 0; }
+.modal-head button {
+  background: none; border: none; color: #94a3b8;
+  font-size: 20px; cursor: pointer; line-height: 1; padding: 0;
+}
+.modal-head button:hover { color: #1e293b; }
+.modal-body { padding: 24px 28px; }
+.modal-body p { font-size: 13px; color: #64748b; margin-bottom: 18px; line-height: 1.6; }
+.modal-actions { padding: 0 28px 24px; }
+.btn-primary {
+  width: 100%; padding: 12px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff; border: none; border-radius: 10px;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(99,102,241,0.3);
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(99,102,241,0.45); }
+.btn-primary:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
+
+/* ── Dark Theme Overrides ─────────────────────────────────────── */
+[data-theme="dark"] body { background: #0b0b14; }
+[data-theme="dark"] .live-bg { background: linear-gradient(135deg,#0b0b14,#0d1117,#111827); }
+[data-theme="dark"] .orb { opacity:.35; filter:blur(80px); }
+[data-theme="dark"] .orb:nth-child(1) { background:radial-gradient(circle,#6366f1,transparent 70%); }
+[data-theme="dark"] .orb:nth-child(2) { background:radial-gradient(circle,#06b6d4,transparent 70%); }
+[data-theme="dark"] .orb:nth-child(3) { background:radial-gradient(circle,#8b5cf6,transparent 70%); }
+[data-theme="dark"] .orb:nth-child(4) { background:radial-gradient(circle,#ec4899,transparent 70%); }
+[data-theme="dark"] .login-container { background:rgba(30,30,46,0.80); box-shadow:0 20px 60px rgba(0,0,0,.45); }
+[data-theme="dark"] .login-header { background:linear-gradient(135deg,rgba(99,102,241,.30),rgba(139,92,246,.25)); }
+[data-theme="dark"] .login-header h1 { color:#e2e8f0; }
+[data-theme="dark"] .login-header p { color:#a5b4fc; }
+[data-theme="dark"] .form-group label { color:#a6adc8; }
+[data-theme="dark"] .form-control { background:rgba(17,17,27,.6); color:#cdd6f4; border-color:rgba(99,102,241,.2); }
+[data-theme="dark"] .form-control::placeholder { color:#6c7086; }
+[data-theme="dark"] .form-control:focus { background:rgba(17,17,27,.8); border-color:rgba(99,102,241,.5); }
+[data-theme="dark"] .msg-error { background:rgba(239,68,68,.12); color:#fca5a5; border-color:rgba(239,68,68,.2); }
+[data-theme="dark"] .msg-success { background:rgba(16,185,129,.12); color:#6ee7b7; border-color:rgba(16,185,129,.2); }
+[data-theme="dark"] .login-footer { background:rgba(11,11,20,.40); }
+[data-theme="dark"] .login-footer a { color:#a5b4fc; }
+[data-theme="dark"] .role-info { background:rgba(99,102,241,.08); border-color:rgba(99,102,241,.15); }
+[data-theme="dark"] .role-info p { color:#9399b2; }
+[data-theme="dark"] .role-info strong { color:#a5b4fc; }
+[data-theme="dark"] .modal-box { background:rgba(30,30,46,.95); border-color:rgba(99,102,241,.2); }
+[data-theme="dark"] .modal-head h3 { color:#e2e8f0; }
+[data-theme="dark"] .modal-head button { color:#9399b2; }
+[data-theme="dark"] .modal-head button:hover { color:#cdd6f4; }
+[data-theme="dark"] .modal-body p { color:#9399b2; }
+[data-theme="dark"] #themeToggle { background:rgba(11,11,20,.75) !important; color:rgba(203,213,225,.75) !important; border-color:rgba(99,102,241,.25) !important; }
+[data-theme="dark"] #themeToggle:hover { background:rgba(30,30,46,.90) !important; }
+</style>
+</head>
+<body>
+
+<!-- Tema Değiştirme Butonu (sağ üst köşe) -->
+<button id="themeToggle" onclick="toggleTheme()"
+  style="position:fixed;top:16px;right:16px;z-index:200;
+         display:flex;align-items:center;gap:6px;
+         padding:8px 14px;background:rgba(255,255,255,.85);
+         border:1px solid rgba(99,102,241,.2);border-radius:20px;
+         font-size:13px;cursor:pointer;backdrop-filter:blur(8px);
+         color:#64748b;box-shadow:0 2px 12px rgba(99,102,241,.1);
+         transition:all .2s;">
+  <span style="font-size:15px" id="themeIcon">🌙</span>
+  <span id="themeLabel">Koyu Tema</span>
+</button>
+
+<!-- ═══════════════════════════════════════════════════════════
+     CANLI ARKA PLAN
+     4 renkli küre + yıldız parçacıkları
+     z-index: 0 → Login kutusunun (z-index:1) arkasında
+     ═══════════════════════════════════════════════════════════ -->
+<div class="live-bg">
+  <div class="orb"></div>  <!-- Mor küre -->
+  <div class="orb"></div>  <!-- Mavi küre -->
+  <div class="orb"></div>  <!-- Menekşe küre -->
+  <div class="orb"></div>  <!-- Pembe küre -->
+  <div class="particles"></div> <!-- Yıldız parçacıkları -->
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     GİRİŞ KUTUSU (Login Container)
+     ═══════════════════════════════════════════════════════════ -->
+<div class="login-container">
+
+  <!-- Başlık — Logo, sistem adı, alt açıklama -->
+  <div class="login-header">
+    <div class="logo"><img src="uni_logo.gif" alt="Üniversite Logosu"></div>
+    <h1>Yurt Yönetim Sistemi</h1>
+    <p>Üniversite Yurt Yönetim Paneli</p>
+  </div>
+
+  <!-- Form alanı — Email, şifre ve giriş butonu -->
+  <div class="login-body">
+
+    <!-- Hata mesajı kutusu — JavaScript ile gösterilir/gizlenir -->
+    <div class="msg msg-error" id="error-msg"></div>
+    <!-- Başarı mesajı kutusu -->
+    <div class="msg msg-success" id="success-msg"></div>
+
+    <!-- Email alanı -->
+    <div class="form-group">
+      <label>Email Adresi</label>
+      <input type="email" class="form-control" id="email" placeholder="ornek@yurt.com" autofocus>
+    </div>
+
+    <!-- Şifre alanı -->
+    <div class="form-group">
+      <label>Şifre</label>
+      <input type="password" class="form-control" id="password" placeholder="Şifreniz">
+    </div>
+
+    <!-- Giriş butonu — login() fonksiyonunu tetikler -->
+    <button class="btn-login" id="btn-login" onclick="login()">Giriş Yap</button>
+
+  </div>
+
+  <!-- Alt kısım — Şifremi unuttum linki -->
+  <div class="login-footer">
+    <a href="#" onclick="openForgotModal(); return false;">Şifremi Unuttum</a>
+  </div>
+</div>
+
+<!-- ŞİFREMİ UNUTTUM MODAL -->
+<div class="modal-overlay" id="forgot-modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>Şifremi Unuttum</h3>
+      <button onclick="closeForgotModal()" aria-label="Kapat">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p>Kayıtlı email adresinizi girin. Şifre sıfırlama bağlantısı gönderilecektir.</p>
+      <div class="msg msg-error" id="forgot-error"></div>
+      <div class="msg msg-success" id="forgot-success"></div>
+      <div class="form-group">
+        <label>Email Adresi</label>
+        <input type="email" class="form-control" id="forgot-email" placeholder="ornek@yurt.com">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-primary" id="btn-forgot" onclick="submitForgotPassword()">Sıfırlama Linki Gönder</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     JAVASCRIPT — Giriş mantığı
+     ═══════════════════════════════════════════════════════════
+
+     ÇALIŞMA PRENSİBİ:
+     1. Sayfa açıldığında → token varsa otomatik yönlendirme dene
+     2. Kullanıcı "Giriş Yap" tıklar → login() çağrılır
+     3. POST /login → email + şifre gönderilir
+     4. Başarılıysa → token + user_type localStorage'a kaydedilir
+     5. redirectByRole() → role göre doğru panele yönlendirilir
+
+     FONKSİYON LİSTESİ:
+     ┌──────────────────────┬──────────────────────────────────────────┐
+     │ login()              │ Email/şifre ile giriş yapar              │
+     │ redirectByRole(role) │ Kullanıcı rolüne göre yönlendirir        │
+     │ tryAutoRedirect()    │ Mevcut token ile otomatik yönlendirme    │
+     └──────────────────────┴──────────────────────────────────────────┘
+-->
+<script>
+
+// ─────────────────────────────────────────────
+// 1. API ADRESİ
+// ─────────────────────────────────────────────
+// window.location.origin → Tarayıcının adres çubuğundaki protokol + host + port
+// Örnek: "http://localhost:3000"
+const API = '/api';
+
+// ─────────────────────────────────────────────
+// 2. ENTER TUŞU DESTEĞİ
+// ─────────────────────────────────────────────
+// Şifre alanında Enter → giriş yap
+// Email alanında Enter → şifre alanına geç
+document.getElementById('password').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') login();
+});
+document.getElementById('email').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('password').focus();
+});
+
+// ─────────────────────────────────────────────
+// 3. OTOMATİK YÖNLENDİRME
+// ─────────────────────────────────────────────
+// Sayfa yüklendiğinde localStorage'da token varsa,
+// backend'den token geçerliliğini kontrol et.
+// Geçerliyse tekrar giriş yapmadan doğru panele yönlendir.
+window.addEventListener('DOMContentLoaded', () => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    tryAutoRedirect(token);
+  }
+});
+
+/**
+ * tryAutoRedirect — Kayıtlı token ile otomatik yönlendirme dener.
+ * /profile endpoint'ine istek yapar → token geçerliyse kullanıcı bilgisini alır.
+ * @param {string} token - localStorage'daki JWT token
+ */
+async function tryAutoRedirect(token) {
+  try {
+    const res = await fetch(API + '/profile', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (res.ok) {
+      const profile = await res.json();
+      // Kullanıcı tipini localStorage'a kaydet (sayfa geçişlerinde gerekli)
+      localStorage.setItem('user_type', profile.user_type);
+      // Doğru panele yönlendir
+      redirectByRole(profile.user_type);
+    }
+    // Token geçersizse → hiçbir şey yapma, kullanıcı giriş ekranında kalır
+  } catch {
+    // Ağ hatası → yine login ekranında kal
+  }
+}
+
+// ─────────────────────────────────────────────
+// 4. GİRİŞ FONKSİYONU
+// ─────────────────────────────────────────────
+
+/**
+ * login — Ana giriş fonksiyonu.
+ *
+ * ADIMLAR:
+ * 1. Email ve şifre alanlarından değerleri al
+ * 2. Boş alan varsa hata mesajı göster
+ * 3. POST /login isteği gönder
+ * 4. Başarılıysa → token + user_type kaydet → yönlendir
+ * 5. Başarısızsa → hata mesajı göster
+ *
+ * API: POST /login
+ * Body: { email, password }
+ * Başarılı Yanıt: { message, token, user_type }
+ * Hata Yanıtları: 401 (yanlış email/şifre), 403 (email doğrulanmamış/hesap pasif)
+ */
+async function login() {
+  // Form alanlarından değerleri al
+  const email    = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  const btn      = document.getElementById('btn-login');
+  const errMsg   = document.getElementById('error-msg');
+  const sucMsg   = document.getElementById('success-msg');
+
+  // Önceki mesajları gizle
+  errMsg.style.display = 'none';
+  sucMsg.style.display = 'none';
+
+  // Boş alan kontrolü
+  if (!email || !password) {
+    errMsg.textContent = 'Email ve şifre gerekli.';
+    errMsg.style.display = 'block';
+    return;
+  }
+
+  // Butonu devre dışı bırak (çift tıklama önleme)
+  btn.disabled = true;
+  btn.textContent = 'Giriş yapılıyor...';
+
+  try {
+    // Backend'e giriş isteği gönder
+    const res = await fetch(API + '/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+
+    const data = await res.json();
+
+    // Hata durumu (email/şifre yanlış, hesap pasif vb.)
+    if (!res.ok) {
+      errMsg.textContent = data.message || 'Giriş başarısız.';
+      errMsg.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Giriş Yap';
+      return;
+    }
+
+    // ─── BAŞARILI GİRİŞ ───
+    // JWT token ve kullanıcı tipini localStorage'a kaydet
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('user_type', data.user_type);
+
+    // Başarı mesajı göster
+    sucMsg.textContent = 'Giriş başarılı! Yönlendiriliyorsunuz...';
+    sucMsg.style.display = 'block';
+
+    // 500ms bekle (kullanıcı mesajı görsün) sonra yönlendir
+    setTimeout(() => {
+      redirectByRole(data.user_type);
+    }, 500);
+
+  } catch (err) {
+    // Ağ hatası — sunucuya bağlanılamadı
+    errMsg.textContent = 'Sunucuya bağlanılamadı.';
+    errMsg.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Giriş Yap';
+  }
+}
+
+// ─────────────────────────────────────────────
+// 5. ROL BAZLI YÖNLENDİRME
+// ─────────────────────────────────────────────
+
+/**
+ * redirectByRole — Kullanıcı tipine göre doğru panele yönlendirir.
+ *
+ * Rol → Sayfa eşlemesi:
+ * ┌─────────────────┬──────────────────────────┐
+ * │ Öğrenci         │ student-panel.html        │
+ * │ Yönetici        │ admin-panel.html          │
+ * │ Admin           │ admin-panel.html          │
+ * │ SuperAdmin      │ admin-panel.html          │
+ * │ Güvenlik        │ admin-panel.html          │
+ * │ Bakım           │ admin-panel.html          │
+ * │ Temizlik        │ admin-panel.html          │
+ * │ (Bilinmeyen)    │ student-panel.html        │
+ * └─────────────────┴──────────────────────────┘
+ *
+ * @param {string} role - Kullanıcının rol tipi (user_type)
+ */
+function redirectByRole(role) {
+  if (role === 'Öğrenci') {
+    window.location.href = 'student-panel.html';
+  } else {
+    window.location.href = 'admin-panel.html';
+  }
+}
+
+// ─────────────────────────────────────────────
+// 6. ŞİFREMİ UNUTTUM MODAL
+// ─────────────────────────────────────────────
+
+function openForgotModal() {
+  const modal = document.getElementById('forgot-modal');
+  document.getElementById('forgot-email').value = '';
+  document.getElementById('forgot-error').style.display = 'none';
+  document.getElementById('forgot-success').style.display = 'none';
+  document.getElementById('btn-forgot').disabled = false;
+  document.getElementById('btn-forgot').textContent = 'Sıfırlama Linki Gönder';
+  modal.classList.add('open');
+  setTimeout(() => document.getElementById('forgot-email').focus(), 100);
+}
+
+function closeForgotModal() {
+  document.getElementById('forgot-modal').classList.remove('open');
+}
+
+// Escape tuşu ile modal kapansın
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeForgotModal();
+});
+
+// Modal dışına tıklayınca kapat
+document.getElementById('forgot-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeForgotModal();
+});
+
+async function submitForgotPassword() {
+  const email   = document.getElementById('forgot-email').value.trim();
+  const errEl   = document.getElementById('forgot-error');
+  const sucEl   = document.getElementById('forgot-success');
+  const btn     = document.getElementById('btn-forgot');
+
+  errEl.style.display = 'none';
+  sucEl.style.display = 'none';
+
+  if (!email) {
+    errEl.textContent = 'Email adresi gerekli.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Gönderiliyor...';
+
+  try {
+    const res = await fetch(API + '/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      errEl.textContent = data.message || 'Bir hata oluştu.';
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Sıfırlama Linki Gönder';
+    } else {
+      sucEl.textContent = data.message;
+      sucEl.style.display = 'block';
+      btn.textContent = 'Gönderildi';
+    }
+  } catch {
+    errEl.textContent = 'Sunucuya bağlanılamadı.';
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Sıfırlama Linki Gönder';
+  }
+}
+
+// ─────────────────────────────────────────────
+// 7. TEMA YÖNETİMİ
+// ─────────────────────────────────────────────
+function toggleTheme() {
+  const cur  = document.documentElement.getAttribute('data-theme') || 'light';
+  const next = cur === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  _updateThemeBtn(next);
+}
+function _updateThemeBtn(t) {
+  const icon = document.getElementById('themeIcon');
+  const lbl  = document.getElementById('themeLabel');
+  if (icon) icon.textContent = t === 'dark' ? '☀️' : '🌙';
+  if (lbl)  lbl.textContent  = t === 'dark' ? 'Açık Tema' : 'Koyu Tema';
+}
+window.addEventListener('DOMContentLoaded', () => {
+  _updateThemeBtn(document.documentElement.getAttribute('data-theme') || 'light');
+});
+
+</script>
+</body>
+</html>

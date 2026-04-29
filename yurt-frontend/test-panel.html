@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Test Kullanıcı Paneli</title>
+</head>
+<body>
+
+<!-- CANLI DUVAR KAĞIDI -->
+<div class="live-bg">
+  <div class="orb"></div>
+  <div class="orb"></div>
+  <div class="orb"></div>
+  <div class="orb"></div>
+  <div class="particles"></div>
+</div>
+
+<div class="panel-wrapper">
+    <div class="panel-header">
+        <h1>Test Kullanıcı Yönetim Paneli</h1>
+        <div class="header-actions">
+            <a href="index.html" class="btn-back">Ana Sayfaya Dön</a>
+            <button class="btn-logout" onclick="logout()">Çıkış Yap</button>
+        </div>
+    </div>
+
+    <div id="auth-check" class="panel-body">
+        <p style="text-align:center;">Yetki kontrol ediliyor...</p>
+    </div>
+</div>
+
+<script>
+// ========== Sayfa yüklendiğinde yetki kontrol et ==========
+window.addEventListener('DOMContentLoaded', async () => {
+    const token = localStorage.getItem("token");
+    const container = document.getElementById("auth-check");
+
+    if (!token) {
+        container.innerHTML = '<div class="msg-error">Giriş yapmanız gerekiyor. <a href="index.html">Giriş Yap</a></div>';
+        return;
+    }
+
+    // Profil kontrolü — sadece Admin/SuperAdmin erişebilir
+    try {
+        const res = await fetch("http://localhost:3000/profile", {
+            headers: { "Authorization": "Bearer " + token }
+        });
+
+        if (!res.ok) {
+            container.innerHTML = '<div class="msg-error">Oturum süresi dolmuş. <a href="index.html">Tekrar giriş yapın</a></div>';
+            return;
+        }
+
+        const profile = await res.json();
+
+        if (profile.user_type !== 'Yönetici' && profile.user_type !== 'Admin' && profile.user_type !== 'SuperAdmin') {
+            container.innerHTML = '<div class="msg-error">Bu sayfaya erişim yetkiniz yok.</div>';
+            return;
+        }
+
+        // Yetkili — paneli göster
+        container.innerHTML = `
+            <div class="info-bar">
+                <span>Giriş yapan: <strong>${profile.email}</strong> (${profile.user_type})</span>
+            </div>
+            <div id="msg-area" style="display:none;" class="admin-msg"></div>
+            <h2>Test Kullanıcıları</h2>
+            <p class="sub-text">Bu panelde sadece 5 test kullanıcısı listelenir.</p>
+            <div id="users-area"><p style="text-align:center;">Yükleniyor...</p></div>
+        `;
+        loadTestUsers();
+
+    } catch (err) {
+        container.innerHTML = '<div class="msg-error">Sunucuya bağlanılamadı.</div>';
+    }
+});
+
+// ========== Sadece 5 test kullanıcısını yükle ==========
+const YURT_EMAILS = [
+    'yonetici@yurt.com','guvenlik@yurt.com','temizlik@yurt.com','bakim@yurt.com',
+    'ogrenci1@yurt.com','ogrenci2@yurt.com','ogrenci3@yurt.com','ogrenci4@yurt.com','ogrenci5@yurt.com'
+];
+
+async function loadTestUsers() {
+    const token = localStorage.getItem("token");
+    const area = document.getElementById("users-area");
+
+    try {
+        const res = await fetch("http://localhost:3000/admin/users", {
+            headers: { "Authorization": "Bearer " + token }
+        });
+
+        if (!res.ok) {
+            area.innerHTML = '<p class="msg-error">Kullanıcılar yüklenemedi.</p>';
+            return;
+        }
+
+        const allUsers = await res.json();
+
+        // Sadece test kullanıcılarını filtrele
+        const users = allUsers.filter(u => YURT_EMAILS.includes(u.email));
+
+        if (users.length === 0) {
+            area.innerHTML = '<p>Test kullanıcısı bulunamadı.</p>';
+            return;
+        }
+
+        let html = '<table class="user-table"><thead><tr>';
+        html += '<th>#</th><th>ID</th><th>Ad Soyad</th><th>Email</th><th>Kullanıcı Adı</th><th>Rol</th><th>Durum</th><th>Email Doğrulama</th><th>İşlemler</th>';
+        html += '</tr></thead><tbody>';
+
+        users.forEach((u, i) => {
+            html += '<tr>';
+            html += '<td>' + (i + 1) + '</td>';
+            html += '<td>' + u.id + '</td>';
+            html += '<td class="name-cell">' + (u.first_name || '-') + ' ' + (u.last_name || '-') + '</td>';
+            html += '<td>' + u.email + '</td>';
+            html += '<td>' + (u.username || '-') + '</td>';
+            html += '<td>';
+            html += '<select id="role-' + u.id + '" class="role-select">';
+            ['Öğrenci', 'Yönetici', 'Güvenlik', 'Temizlik', 'Bakım'].forEach(role => {
+                html += '<option value="' + role + '"' + (u.user_type === role ? ' selected' : '') + '>' + role + '</option>';
+            });
+            html += '</select></td>';
+            html += '<td>' + (u.is_active ? '<span class="badge-ok">Aktif</span>' : '<span class="badge-no">Pasif</span>') + '</td>';
+            html += '<td>' + (u.is_email_verified ? '<span class="badge-ok">Doğrulandı</span>' : '<span class="badge-no">Doğrulanmadı</span>') + '</td>';
+            html += '<td class="action-cell">';
+            html += '<button class="btn-role" onclick="changeRole(' + u.id + ')">Rolü Kaydet</button>';
+            html += '<button class="btn-reset" onclick="resetPassword(' + u.id + ')">Şifre Sıfırla</button>';
+            html += '</td>';
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        area.innerHTML = html;
+
+    } catch (err) {
+        area.innerHTML = '<p class="msg-error">Sunucuya bağlanılamadı.</p>';
+    }
+}
+
+// ========== Rol Değiştir ==========
+async function changeRole(userId) {
+    const token = localStorage.getItem("token");
+    const select = document.getElementById("role-" + userId);
+    const newRole = select.value;
+
+    try {
+        const res = await fetch("http://localhost:3000/admin/users/" + userId + "/role", {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + token
+            },
+            body: JSON.stringify({ user_type: newRole })
+        });
+
+        const data = await res.json();
+        showMsg(data.message, res.ok ? 'success' : 'error');
+        if (res.ok) loadTestUsers();
+
+    } catch (err) {
+        showMsg("Sunucu hatası!", "error");
+    }
+}
+
+// ========== Şifre Sıfırla ==========
+async function resetPassword(userId) {
+    if (!confirm("Bu kullanıcının şifresi 'YeniSifre123!' olarak sıfırlanacak. Emin misiniz?")) return;
+
+    const token = localStorage.getItem("token");
+
+    try {
+        const res = await fetch("http://localhost:3000/admin/users/" + userId + "/reset-password", {
+            method: "PATCH",
+            headers: { "Authorization": "Bearer " + token }
+        });
+
+        const data = await res.json();
+        showMsg(data.message, res.ok ? 'success' : 'error');
+
+    } catch (err) {
+        showMsg("Sunucu hatası!", "error");
+    }
+}
+
+// ========== Bildirim ==========
+function showMsg(text, type) {
+    const el = document.getElementById("msg-area");
+    el.textContent = text;
+    el.className = 'admin-msg ' + (type === 'success' ? 'msg-success' : 'msg-error');
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
+
+// ========== Çıkış ==========
+function logout() {
+    localStorage.removeItem("token");
+    window.location.href = "index.html";
+}
+</script>
+
+<style>
+    * { box-sizing: border-box; }
+    body {
+        background: #0b0b14;
+        color: #cdd6f4;
+        font-family: 'Segoe UI', 'Arial', sans-serif;
+        margin: 0;
+        padding: 20px;
+        min-height: 100vh;
+        overflow-x: hidden;
+    }
+
+    /* ═══ CANLI DUVAR KAĞIDI ═══ */
+    .live-bg {
+      position: fixed; inset: 0; z-index: 0; overflow: hidden;
+      background: linear-gradient(135deg, #0b0b14 0%, #0d1117 40%, #111827 100%);
+    }
+    .live-bg .orb {
+      position: absolute; border-radius: 50%; filter: blur(80px);
+      animation: orbFloat 20s ease-in-out infinite; opacity: 0.45;
+    }
+    .live-bg .orb:nth-child(1) {
+      width: 500px; height: 500px; top: -10%; left: -5%;
+      background: radial-gradient(circle, #6366f1, transparent 70%);
+      animation-duration: 22s;
+    }
+    .live-bg .orb:nth-child(2) {
+      width: 400px; height: 400px; top: 50%; right: -8%;
+      background: radial-gradient(circle, #06b6d4, transparent 70%);
+      animation-duration: 18s; animation-delay: -5s;
+    }
+    .live-bg .orb:nth-child(3) {
+      width: 350px; height: 350px; bottom: -5%; left: 30%;
+      background: radial-gradient(circle, #8b5cf6, transparent 70%);
+      animation-duration: 25s; animation-delay: -10s;
+    }
+    .live-bg .orb:nth-child(4) {
+      width: 250px; height: 250px; top: 30%; left: 50%;
+      background: radial-gradient(circle, #ec4899, transparent 70%);
+      animation-duration: 30s; animation-delay: -15s; opacity: 0.2;
+    }
+    .live-bg .particles {
+      position: absolute; inset: 0;
+      background-image:
+        radial-gradient(1px 1px at 10% 20%, rgba(255,255,255,0.35) 0%, transparent 100%),
+        radial-gradient(1px 1px at 80% 10%, rgba(255,255,255,0.25) 0%, transparent 100%),
+        radial-gradient(1.5px 1.5px at 30% 70%, rgba(255,255,255,0.2) 0%, transparent 100%),
+        radial-gradient(1px 1px at 60% 50%, rgba(255,255,255,0.3) 0%, transparent 100%),
+        radial-gradient(1px 1px at 90% 80%, rgba(255,255,255,0.2) 0%, transparent 100%),
+        radial-gradient(1.5px 1.5px at 50% 30%, rgba(255,255,255,0.15) 0%, transparent 100%),
+        radial-gradient(1px 1px at 20% 90%, rgba(255,255,255,0.25) 0%, transparent 100%);
+      animation: particleDrift 60s linear infinite;
+    }
+    @keyframes orbFloat {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      25% { transform: translate(40px, -30px) scale(1.05); }
+      50% { transform: translate(-20px, 40px) scale(0.95); }
+      75% { transform: translate(30px, 20px) scale(1.02); }
+    }
+    @keyframes particleDrift {
+      0% { transform: translateY(0); }
+      100% { transform: translateY(-100px); }
+    }
+
+    /* ======= PANEL LAYOUT ======= */
+    .panel-wrapper {
+        max-width: 1100px;
+        margin: 0 auto;
+        background: rgba(30,30,46,0.75);
+        border-radius: 14px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 1px rgba(99,102,241,0.2);
+        overflow: hidden;
+        position: relative; z-index: 1;
+        backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(99,102,241,0.12);
+    }
+    .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.2));
+        color: #e2e8f0;
+        padding: 18px 28px;
+        border-bottom: 1px solid rgba(99,102,241,0.15);
+    }
+    .panel-header h1 {
+        margin: 0;
+        font-size: 1.3em;
+        color: #e2e8f0;
+    }
+    .header-actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+    .panel-body {
+        padding: 24px 28px;
+    }
+    .info-bar {
+        background: rgba(99,102,241,0.08);
+        padding: 10px 16px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+        font-size: 0.95em;
+        color: #a6adc8;
+        border: 1px solid rgba(99,102,241,0.12);
+    }
+    .info-bar strong { color: #a5b4fc; }
+    .sub-text {
+        color: #6c7086;
+        font-size: 0.9em;
+        margin-top: -8px;
+        margin-bottom: 16px;
+    }
+    h2 {
+        color: #a5b4fc;
+        margin-bottom: 4px;
+    }
+
+    /* ======= TABLO ======= */
+    .user-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9em;
+        margin-top: 10px;
+    }
+    .user-table thead {
+        background: rgba(99,102,241,0.15);
+    }
+    .user-table th {
+        padding: 11px 10px;
+        text-align: left;
+        font-weight: 600;
+        white-space: nowrap;
+        color: #a5b4fc;
+        border-bottom: 2px solid rgba(99,102,241,0.2);
+    }
+    .user-table td {
+        padding: 11px 10px;
+        border-bottom: 1px solid rgba(99,102,241,0.08);
+        vertical-align: middle;
+        color: #bac2de;
+    }
+    .user-table tbody tr:hover {
+        background: rgba(99,102,241,0.06);
+    }
+    .name-cell {
+        font-weight: 600;
+        color: #cdd6f4;
+    }
+
+    /* ======= SELECT & BUTONLAR ======= */
+    .role-select {
+        padding: 6px 10px;
+        border-radius: 5px;
+        border: 1px solid rgba(99,102,241,0.2);
+        font-size: 0.9em;
+        cursor: pointer;
+        background: rgba(17,17,27,0.5);
+        color: #cdd6f4;
+    }
+    .role-select:focus {
+        outline: none;
+        border-color: #6366f1;
+        box-shadow: 0 0 0 2px rgba(99,102,241,0.15);
+    }
+    .action-cell {
+        display: flex;
+        gap: 6px;
+    }
+    button, .btn-back {
+        border: none;
+        border-radius: 6px;
+        padding: 8px 16px;
+        font-size: 0.88em;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-block;
+        transition: all 0.2s;
+    }
+    .btn-role {
+        background: linear-gradient(135deg, #10b981, #059669);
+        color: #fff;
+        white-space: nowrap;
+        box-shadow: 0 2px 8px rgba(16,185,129,0.25);
+    }
+    .btn-role:hover { background: linear-gradient(135deg, #059669, #047857); box-shadow: 0 4px 12px rgba(16,185,129,0.35); }
+    .btn-reset {
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        color: #fff;
+        white-space: nowrap;
+        box-shadow: 0 2px 8px rgba(245,158,11,0.25);
+    }
+    .btn-reset:hover { background: linear-gradient(135deg, #d97706, #b45309); box-shadow: 0 4px 12px rgba(245,158,11,0.35); }
+    .btn-logout {
+        background: linear-gradient(135deg, #ef4444, #dc2626);
+        color: #fff;
+        box-shadow: 0 2px 8px rgba(239,68,68,0.25);
+    }
+    .btn-logout:hover { background: linear-gradient(135deg, #dc2626, #b91c1c); box-shadow: 0 4px 12px rgba(239,68,68,0.35); }
+    .btn-back {
+        background: rgba(99,102,241,0.1);
+        color: #a5b4fc;
+        border: 1px solid rgba(99,102,241,0.2);
+        font-weight: 600;
+    }
+    .btn-back:hover { background: rgba(99,102,241,0.2); border-color: rgba(99,102,241,0.4); }
+
+    /* ======= BADGE ======= */
+    .badge-ok {
+        background: rgba(16,185,129,0.18);
+        color: #6ee7b7;
+        padding: 3px 10px;
+        border-radius: 10px;
+        font-size: 0.85em;
+        font-weight: 600;
+    }
+    .badge-no {
+        background: rgba(239,68,68,0.18);
+        color: #fca5a5;
+        padding: 3px 10px;
+        border-radius: 10px;
+        font-size: 0.85em;
+        font-weight: 600;
+    }
+
+    /* ======= MESAJLAR ======= */
+    .admin-msg {
+        padding: 12px 20px;
+        border-radius: 6px;
+        margin-bottom: 16px;
+        font-weight: bold;
+        text-align: center;
+    }
+    .msg-success {
+        background: rgba(16,185,129,0.12);
+        color: #6ee7b7;
+        border: 1px solid rgba(16,185,129,0.25);
+    }
+    .msg-error {
+        background: rgba(239,68,68,0.12);
+        color: #fca5a5;
+        border: 1px solid rgba(239,68,68,0.25);
+        padding: 12px 20px;
+        border-radius: 6px;
+        text-align: center;
+    }
+    .msg-error a {
+        color: #a5b4fc;
+        font-weight: bold;
+    }
+
+    /* ═══ SCROLLBAR ═══ */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.25); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,0.4); }
+</style>
+
+</body>
+</html>

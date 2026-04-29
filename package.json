@@ -1,0 +1,7 @@
+{
+  "name": "dormitory-management-system",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "cd yurt-backend && node index.js"
+  }
+}
