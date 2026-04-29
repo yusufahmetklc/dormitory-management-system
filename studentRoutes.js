@@ -5,7 +5,7 @@
 // ║  Öğrencilere gelen ziyaretçilerin giriş-çıkışını takip eder. ║
 // ║                                                                  ║
 // ║  ENDPOINT'LER:                                                  ║
-// ║  GET  /visitors             → Tüm ziyaretçileri listele       ║
+// ║  GET  /visitors             → Tüm ziyaretçileri listeler       ║
 // ║  POST /visitors             → Ziyaretçi girişi kaydet         ║
 // ║  GET  /visitors/my          → Öğrencinin ziyaretçileri        ║
 // ║  PUT  /visitors/:id/checkout→ Ziyaretçi çıkışı kaydet          ║
