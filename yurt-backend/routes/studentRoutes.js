@@ -176,10 +176,9 @@ router.get("/dashboard-full", authenticateToken, async (req, res) => {
     // 3. Oda arkadaşları
     if (dashboard.room) {
       const roommates = await pool.query(`
-        SELECT u.id, u.first_name, u.last_name, sp.phone, sp.faculty, sp.department, sp.class_year
+        SELECT u.id, u.first_name, u.last_name, u.phone, u.faculty, u.department, u.class_year
         FROM room_assignments ra
         JOIN public.users u ON ra.user_id = u.id
-        LEFT JOIN student_profiles sp ON sp.user_id = u.id
         WHERE ra.room_id = $1 AND ra.user_id != $2
         ORDER BY u.first_name
       `, [dashboard.room.room_id, req.user.id]);
@@ -417,7 +416,8 @@ router.get("/profile/:id",
     try {
       const result = await pool.query(`
         SELECT u.id, u.email, u.user_type, u.first_name, u.last_name, u.username,
-               sp.user_id AS sp_user_id, sp.room_id, sp.created_at AS sp_created_at
+               u.phone, u.faculty, u.department, u.student_number, u.gender, u.class_year,
+               sp.user_id AS sp_user_id, sp.created_at AS sp_created_at
         FROM public.users u
         LEFT JOIN student_profiles sp ON sp.user_id = u.id
         WHERE u.id = $1
@@ -441,7 +441,9 @@ router.get("/profile/:id",
         LIMIT 1
       `, [userId]);
 
-      res.json({ success: true, data: { student, room: room.rows[0] || null } });
+      // Frontend'in beklediği format: data?.student || data
+      // student ve room alanları root'ta döndürülür
+      res.json({ success: true, student, room: room.rows[0] || null });
     } catch (err) {
       console.error("Öğrenci profil/:id hatası:", err);
       res.status(500).json({ success: false, message: "Sunucu hatası" });
@@ -611,6 +613,7 @@ router.get("/list",
           is_active
         FROM public.users
         WHERE user_type = 'Student'
+          AND (is_deleted = FALSE OR is_deleted IS NULL)
         ORDER BY last_name, first_name
       `);
 
@@ -652,17 +655,17 @@ router.get("/stats",
       `);
 
       const faculties = await pool.query(`
-        SELECT sp.faculty, COUNT(*) AS count
-        FROM student_profiles sp JOIN public.users u ON sp.user_id = u.id
-        WHERE u.user_type = 'Student' AND sp.faculty IS NOT NULL
-        GROUP BY sp.faculty ORDER BY count DESC
+        SELECT u.faculty, COUNT(*) AS count
+        FROM public.users u
+        WHERE u.user_type = 'Öğrenci' AND u.faculty IS NOT NULL
+        GROUP BY u.faculty ORDER BY count DESC
       `);
 
       const classYears = await pool.query(`
-        SELECT sp.class_year, COUNT(*) AS count
-        FROM student_profiles sp JOIN public.users u ON sp.user_id = u.id
-        WHERE u.user_type = 'Student' AND sp.class_year IS NOT NULL
-        GROUP BY sp.class_year ORDER BY sp.class_year
+        SELECT u.class_year, COUNT(*) AS count
+        FROM public.users u
+        WHERE u.user_type = 'Öğrenci' AND u.class_year IS NOT NULL
+        GROUP BY u.class_year ORDER BY u.class_year
       `);
 
       res.json({

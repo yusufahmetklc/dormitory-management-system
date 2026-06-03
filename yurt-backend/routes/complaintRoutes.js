@@ -14,6 +14,8 @@
 const express = require("express");
 const pool = require("../config/db");
 const { authenticateToken, authorizeRole } = require("../middleware/auth");
+const { softDelete, softRestore } = require("../middleware/softDelete");
+const { complaintsReady } = require("../middleware/softDeleteReady");
 
 const router = express.Router();
 
@@ -26,7 +28,8 @@ router.post("/", authenticateToken, async (req, res) => {
   const { category, title, description } = req.body;
   const user_id = req.user.id;
 
-  const validCategories = ['Arıza', 'Şikayet', 'Öneri', 'Temizlik', 'Güvenlik', 'Oda', 'Yemek', 'Gürültü', 'Teknik', 'Diğer'];
+  // Yönlendirme: Arıza → Bakım personeli, Temizlik → Temizlik personeli, Diğer → Yönetici
+  const validCategories = ['Arıza', 'Temizlik', 'Güvenlik', 'Diğer'];
 
   if (!user_id) {
     return res.status(401).json({ success: false, message: "Kimlik doğrulama gerekli" });
@@ -60,6 +63,7 @@ router.post("/", authenticateToken, async (req, res) => {
 // ------------------------------------
 router.get("/my", authenticateToken, async (req, res) => {
   try {
+    const sdReady = await complaintsReady();
     const result = await pool.query(`
       SELECT c.id, c.user_id, c.category, c.title, c.description,
              CASE c.status
@@ -71,6 +75,7 @@ router.get("/my", authenticateToken, async (req, res) => {
              c.created_at
       FROM complaints c
       WHERE c.user_id = $1
+        ${sdReady ? 'AND c.is_deleted = FALSE' : ''}
       ORDER BY c.created_at DESC
     `, [req.user.id]);
 
@@ -91,6 +96,7 @@ router.get("/",
   authorizeRole("Yönetici", "Bakım", "Temizlik", "Güvenlik", "Admin", "SuperAdmin"),
   async (req, res) => {
     try {
+      const sdReady = await complaintsReady();
       const { category } = req.query;
       let query = `
         SELECT c.id, c.user_id, c.category, c.title, c.description,
@@ -101,17 +107,26 @@ router.get("/",
                  WHEN 'rejected'    THEN 'Reddedildi'
                  ELSE c.status END AS status,
                c.priority, c.created_at,
-               u.first_name, u.last_name, u.email
+               u.first_name, u.last_name, u.email,
+               r.room_number
         FROM complaints c
         JOIN users u ON c.user_id = u.id
+        LEFT JOIN room_assignments ra ON ra.user_id = c.user_id AND ra.is_active = TRUE
+        LEFT JOIN rooms r ON r.id = ra.room_id
         WHERE 1=1
+          ${sdReady ? 'AND c.is_deleted = FALSE' : ''}
       `;
       const params = [];
       let idx = 1;
 
       if (req.user.user_type === 'Bakım') {
         query += ` AND c.category = 'Arıza'`;
+      } else if (req.user.user_type === 'Temizlik') {
+        query += ` AND c.category = 'Temizlik'`;
+      } else if (req.user.user_type === 'Güvenlik') {
+        query += ` AND c.category = 'Güvenlik'`;
       }
+      // Yönetici / Admin / SuperAdmin → kategori kısıtlaması yok, hepsini görür
 
       if (category) {
         query += ` AND c.category = $${idx++}`;
@@ -131,12 +146,12 @@ router.get("/",
 
 // ------------------------------------
 // PATCH /complaints/:id/status
-// Bildirim durumunu günceller (Yönetici)
+// Bildirim durumunu günceller (Yönetici/Personel)
 // Body: { status, response, assigned_to }
 // ------------------------------------
 router.patch("/:id/status",
   authenticateToken,
-  authorizeRole("Yönetici", "Bakım", "Temizlik", "Admin", "SuperAdmin"),
+  authorizeRole("Yönetici", "Bakım", "Temizlik", "Güvenlik", "Admin", "SuperAdmin"),
   async (req, res) => {
     try {
       const { status, response } = req.body;
@@ -171,6 +186,7 @@ router.get("/stats",
   authorizeRole("Yönetici", "Admin", "SuperAdmin"),
   async (req, res) => {
     try {
+      const sdReady = await complaintsReady();
       const stats = await pool.query(`
         SELECT
           COUNT(*) AS total,
@@ -180,6 +196,7 @@ router.get("/stats",
           COUNT(*) FILTER (WHERE category = 'Güvenlik') AS security,
           COUNT(*) FILTER (WHERE category = 'Öneri') AS suggestions
         FROM complaints
+        ${sdReady ? 'WHERE is_deleted = FALSE' : ''}
       `);
       res.json({ success: true, data: stats.rows[0] });
     } catch (err) {
@@ -191,39 +208,80 @@ router.get("/stats",
 
 // ------------------------------------
 // DELETE /complaints/:id
-// Talebi siler
+// Talebi soft-delete yapar
 // Yönetici her talebi silebilir; öğrenci sadece kendi talebini silebilir
 // ------------------------------------
 router.delete("/:id",
   authenticateToken,
   async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ success: false, message: "Geçersiz talep ID" });
+    }
+    const adminRoles = ['Yönetici', 'Admin', 'SuperAdmin'];
+    const isAdmin = adminRoles.includes(req.user.user_type);
     try {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) {
-        return res.status(400).json({ success: false, message: "Geçersiz talep ID" });
-      }
-
-      const adminRoles = ['Yönetici', 'Admin', 'SuperAdmin'];
-      const isAdmin = adminRoles.includes(req.user.user_type);
-
       let result;
       if (isAdmin) {
-        result = await pool.query('DELETE FROM complaints WHERE id = $1 RETURNING id', [id]);
+        result = await pool.query(
+          `UPDATE complaints
+           SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = $1
+           WHERE id = $2 AND is_deleted = FALSE
+           RETURNING id`,
+          [req.user.id, id]
+        );
       } else {
         // Öğrenci sadece kendi talebini silebilir
         result = await pool.query(
-          'DELETE FROM complaints WHERE id = $1 AND user_id = $2 RETURNING id',
-          [id, req.user.id]
+          `UPDATE complaints
+           SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = $1
+           WHERE id = $2 AND user_id = $3 AND is_deleted = FALSE
+           RETURNING id`,
+          [req.user.id, id, req.user.id]
         );
       }
-
       if (result.rowCount === 0) {
         return res.status(404).json({ success: false, message: "Talep bulunamadı veya silme yetkiniz yok" });
       }
-
       res.json({ success: true, message: "Talep silindi" });
     } catch (err) {
+      if (err.code === '42703') {
+        // is_deleted kolonu henüz yok, geçici hard delete
+        let r;
+        if (isAdmin) {
+          r = await pool.query('DELETE FROM complaints WHERE id = $1 RETURNING id', [id]);
+        } else {
+          r = await pool.query('DELETE FROM complaints WHERE id = $1 AND user_id = $2 RETURNING id', [id, req.user.id]);
+        }
+        if (r.rowCount === 0) return res.status(404).json({ success: false, message: "Talep bulunamadı veya silme yetkiniz yok" });
+        return res.json({ success: true, message: "Talep silindi" });
+      }
       console.error("Talep silme hatası:", err.message);
+      res.status(500).json({ success: false, message: "Sunucu hatası" });
+    }
+  }
+);
+
+// ------------------------------------
+// POST /complaints/:id/restore
+// Soft-delete edilmiş talebi geri yükler (Yönetici)
+// ------------------------------------
+router.post("/:id/restore",
+  authenticateToken,
+  authorizeRole("Yönetici", "Admin", "SuperAdmin"),
+  async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ success: false, message: "Geçersiz talep ID" });
+    }
+    try {
+      const affected = await softRestore(pool, "complaints", id);
+      if (affected === 0) {
+        return res.status(404).json({ success: false, message: "Talep bulunamadı veya zaten aktif" });
+      }
+      res.json({ success: true, message: "Talep geri yüklendi" });
+    } catch (err) {
+      console.error("Talep geri yükleme hatası:", err.message);
       res.status(500).json({ success: false, message: "Sunucu hatası" });
     }
   }

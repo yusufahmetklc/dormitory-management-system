@@ -33,6 +33,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Yönetici Paneli — Yurt Yönetim Sistemi</title>
 <script>(function(){var t=localStorage.getItem('theme')||'light';document.documentElement.setAttribute('data-theme',t);})();</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 
 <style>
 /*
@@ -151,6 +152,7 @@ body {
 }
 .sidebar-brand {
   display: flex; align-items: center; gap: 9px;
+  justify-content: space-between;
   margin-bottom: 14px;
   padding-bottom: 14px;
   border-bottom: 1px solid rgba(99,102,241,.08);
@@ -382,22 +384,80 @@ tr:hover td { background: rgba(99,102,241,.04); }
    ─────────────────────────────────────────────
    Sağ üst köşede 3 saniye görünüp kaybolan bilgi mesajı.
 */
-.toast {
-  position: fixed; top: 20px; right: 20px;
-  padding: 12px 20px;
-  background: rgba(255,255,255,.97);
-  border: 1px solid var(--primary);
-  border-radius: 10px; color: #1e293b; font-size: 13px;
-  z-index: 2000;
+.toast-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.45);
+  z-index: 9000;
   display: none;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 8px 32px rgba(99,102,241,.15);
+  backdrop-filter: blur(3px);
 }
-.toast.show { display: block; animation: fadeIn .3s; }
+.toast-overlay.show { display: block; animation: overlayFadeIn .2s; }
+@keyframes overlayFadeIn { from { opacity:0; } to { opacity:1; } }
 
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-10px); }
-  to   { opacity: 1; transform: translateY(0); }
+.toast {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%) scale(.88);
+  min-width: 320px; max-width: 460px; width: 90%;
+  padding: 28px 28px 22px;
+  background: rgba(255,255,255,.98);
+  border-radius: 20px;
+  z-index: 9001;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  box-shadow: 0 24px 64px rgba(0,0,0,.22), 0 0 0 1px rgba(255,255,255,.3);
+  backdrop-filter: blur(20px);
+}
+.toast.show {
+  display: flex;
+  animation: toastPop .28s cubic-bezier(.34,1.56,.64,1) forwards;
+}
+@keyframes toastPop {
+  from { opacity:0; transform: translate(-50%,-50%) scale(.78); }
+  to   { opacity:1; transform: translate(-50%,-50%) scale(1); }
+}
+.toast-icon  { font-size: 42px; line-height: 1; }
+.toast-title { font-size: 16px; font-weight: 700; color: #1e293b; }
+.toast-msg   { font-size: 14px; color: #475569; line-height: 1.55; }
+.toast-close {
+  margin-top: 8px; padding: 9px 32px;
+  border: none; border-radius: 10px;
+  cursor: pointer; font-size: 13px; font-weight: 600;
+  transition: all .15s; width: 100%;
+}
+.toast-close:hover { filter: brightness(.9); }
+.toast.toast-success { border-top: 4px solid #10b981; }
+.toast.toast-success .toast-close { background: #10b981; color: #fff; }
+.toast.toast-error   { border-top: 4px solid #ef4444; }
+.toast.toast-error   .toast-close { background: #ef4444; color: #fff; }
+.toast.toast-warning { border-top: 4px solid #f59e0b; }
+.toast.toast-warning .toast-close { background: #f59e0b; color: #fff; }
+.toast.toast-info    { border-top: 4px solid #6366f1; }
+.toast.toast-info    .toast-close { background: #6366f1; color: #fff; }
+
+/* Sidebar user-card içi logout butonu — artık kullanılmıyor, sidebar-brand'e taşındı */
+.sidebar-signout {
+  margin-left: auto;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid rgba(99,102,241,.22);
+  border-radius: 7px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  white-space: nowrap;
+  transition: all .18s;
+  display: flex; align-items: center; gap: 4px;
+}
+.sidebar-signout:hover {
+  background: rgba(99,102,241,.1);
+  border-color: rgba(99,102,241,.45);
+  color: #4338ca;
 }
 
 /* ─────────────────────────────────────────────
@@ -718,6 +778,169 @@ tr:hover td { background: rgba(99,102,241,.04); }
   .pf-grid.g4 { grid-template-columns: 1fr 1fr; }
 }
 
+/* ════════════════════════════════════════════════════
+   ÖDEME ACCORDION — Profesyonel Gruplu Görünüm
+   ════════════════════════════════════════════════════ */
+
+/* Yeni badge türleri */
+.pay-bdg-partial  { background: rgba(251,146,60,.13);  color: #fb923c; border: 1px solid rgba(251,146,60,.22); }
+.pay-bdg-upcoming { background: rgba(96,165,250,.13);  color: #60a5fa; border: 1px solid rgba(96,165,250,.22); }
+
+/* ── Filtre Çubuğu ── */
+.pay-filter-bar {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  padding: 12px 16px;
+  background: rgba(255,255,255,.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(99,102,241,.1);
+  border-radius: 14px;
+  margin-bottom: 16px;
+}
+.pay-filter-bar input,
+.pay-filter-bar select {
+  background: rgba(248,247,255,.9);
+  border: 1px solid rgba(99,102,241,.15);
+  border-radius: 9px;
+  padding: 7px 11px;
+  font-size: 12px; color: var(--text);
+  outline: none; height: 34px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.pay-filter-bar input:focus,
+.pay-filter-bar select:focus {
+  border-color: rgba(99,102,241,.4);
+  box-shadow: 0 0 0 3px rgba(99,102,241,.08);
+}
+.pay-filter-bar input { flex: 1; min-width: 160px; }
+.pay-filter-bar select { min-width: 130px; cursor: pointer; }
+.pay-filter-lbl {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .5px; color: var(--text-dim); white-space: nowrap;
+}
+
+/* ── Accordion Kart Listesi ── */
+.pay-acc-list { display: flex; flex-direction: column; gap: 8px; padding: 14px; }
+
+.pay-acc-card {
+  border: 1px solid rgba(99,102,241,.12);
+  border-radius: 14px; overflow: hidden;
+  background: rgba(255,255,255,.62);
+  backdrop-filter: blur(8px);
+  transition: box-shadow .2s, border-color .2s;
+}
+.pay-acc-card:hover { border-color: rgba(99,102,241,.28); box-shadow: 0 4px 20px rgba(99,102,241,.1); }
+.pay-acc-card.has-overdue  { border-color: rgba(239,68,68,.3); }
+.pay-acc-card.has-upcoming { border-color: rgba(96,165,250,.3); }
+
+/* ── Accordion Header ── */
+.pay-acc-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 16px; cursor: pointer; user-select: none;
+  transition: background .15s;
+}
+.pay-acc-header:hover { background: rgba(99,102,241,.04); }
+.pay-acc-card.has-overdue .pay-acc-header { background: rgba(239,68,68,.025); }
+
+.pay-acc-info { flex: 1; min-width: 0; }
+.pay-acc-name  { font-size: 13px; font-weight: 700; color: #1e293b; line-height: 1.2; }
+.pay-acc-email { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
+.pay-acc-badges { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
+
+/* ── Sağ Taraf Stats ── */
+.pay-acc-stats { display: flex; gap: 14px; align-items: center; flex-shrink: 0; }
+.pay-acc-stat  { text-align: center; }
+.pay-acc-stat-val { font-size: 12px; font-weight: 800; color: #1e293b; line-height: 1.1; }
+.pay-acc-stat-lbl { font-size: 9px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--text-dim); margin-top: 2px; }
+.pay-acc-stat-val.clr-green  { color: #34d399; }
+.pay-acc-stat-val.clr-red    { color: #f87171; }
+.pay-acc-stat-val.clr-orange { color: #fb923c; }
+
+/* ── İlerleme Çubuğu ── */
+.pay-prog-wrap { flex-shrink: 0; width: 100px; }
+.pay-prog-bar {
+  height: 6px; background: rgba(99,102,241,.1);
+  border-radius: 99px; overflow: hidden; margin-bottom: 3px;
+}
+.pay-prog-fill {
+  height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg,#6366f1,#34d399);
+  transition: width .5s cubic-bezier(.34,1.56,.64,1);
+}
+.pay-prog-fill.fill-danger { background: linear-gradient(90deg,#f87171,#fbbf24); }
+.pay-prog-fill.fill-full   { background: linear-gradient(90deg,#34d399,#10b981); }
+.pay-prog-pct { font-size: 9px; font-weight: 700; color: var(--text-dim); text-align: center; }
+
+/* ── Expand Chevron ── */
+.pay-acc-chevron {
+  font-size: 11px; color: var(--text-dim);
+  transition: transform .2s ease; flex-shrink: 0; margin-left: 2px;
+}
+.pay-acc-card.open .pay-acc-chevron { transform: rotate(180deg); }
+
+/* ── Detail Panel ── */
+.pay-acc-detail {
+  display: none;
+  border-top: 1px solid rgba(99,102,241,.08);
+  animation: accOpen .18s ease;
+}
+.pay-acc-card.open .pay-acc-detail { display: block; }
+@keyframes accOpen {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Sub-table ── */
+.pay-sub-tbl { width: 100%; border-collapse: collapse; }
+.pay-sub-tbl th {
+  padding: 9px 14px; font-size: 10px; font-weight: 800;
+  letter-spacing: .7px; text-transform: uppercase; color: var(--text-dim);
+  background: rgba(99,102,241,.04); border-bottom: 1px solid rgba(99,102,241,.08);
+}
+.pay-sub-tbl td {
+  padding: 10px 14px; border-bottom: 1px solid rgba(99,102,241,.05);
+  vertical-align: middle; font-size: 12px;
+}
+.pay-sub-tbl tbody tr:last-child td { border-bottom: none; }
+.pay-sub-tbl tbody tr:hover td { background: rgba(99,102,241,.03); }
+.pay-sub-tbl tr.row-overdue  td { background: rgba(239,68,68,.03); }
+.pay-sub-tbl tr.row-upcoming td { background: rgba(96,165,250,.03); }
+
+/* Row mini-progress */
+.row-prog-bar {
+  height: 3px; background: rgba(99,102,241,.1);
+  border-radius: 99px; overflow: hidden; margin-top: 3px; width: 60px;
+}
+.row-prog-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg,#6366f1,#34d399); }
+
+/* ── Ödeme Türü Chip ── */
+.ptype-chip {
+  display: inline-flex; align-items: center;
+  padding: 2px 7px; border-radius: 5px;
+  font-size: 10px; font-weight: 700;
+  background: rgba(99,102,241,.1); color: #6366f1; white-space: nowrap;
+}
+.ptype-chip.type-monthly  { background: rgba(16,185,129,.1);  color: #10b981; }
+.ptype-chip.type-deposit  { background: rgba(167,139,250,.12); color: #a78bfa; }
+.ptype-chip.type-extra    { background: rgba(251,146,60,.1);   color: #fb923c; }
+.ptype-chip.type-partial  { background: rgba(251,146,60,.1);   color: #fb923c; }
+.ptype-chip.type-install  { background: rgba(96,165,250,.1);   color: #60a5fa; }
+
+/* ── Dark Mode Accordion ── */
+[data-theme="dark"] .pay-filter-bar { background: rgba(18,18,30,.82); border-color: rgba(255,255,255,.07); }
+[data-theme="dark"] .pay-filter-bar input,
+[data-theme="dark"] .pay-filter-bar select { background: rgba(11,11,20,.7); border-color: rgba(255,255,255,.08); color: var(--text); }
+[data-theme="dark"] .pay-acc-card { background: rgba(18,18,30,.62); border-color: rgba(255,255,255,.06); }
+[data-theme="dark"] .pay-acc-card:hover { border-color: rgba(99,102,241,.22); }
+[data-theme="dark"] .pay-acc-card.has-overdue { border-color: rgba(239,68,68,.25); }
+[data-theme="dark"] .pay-acc-name { color: #e2e8f0; }
+[data-theme="dark"] .pay-acc-stat-val { color: #e2e8f0; }
+[data-theme="dark"] .pay-sub-tbl th { background: rgba(99,102,241,.07); border-bottom-color: rgba(255,255,255,.06); }
+[data-theme="dark"] .pay-sub-tbl td { border-bottom-color: rgba(255,255,255,.04); }
+[data-theme="dark"] .pay-sub-tbl tr.row-overdue  td { background: rgba(239,68,68,.05); }
+[data-theme="dark"] .pay-sub-tbl tr.row-upcoming td { background: rgba(96,165,250,.05); }
+[data-theme="dark"] .pay-prog-bar { background: rgba(255,255,255,.07); }
+[data-theme="dark"] .row-prog-bar { background: rgba(255,255,255,.07); }
+
 /* ═══════════════════════════════════════════════════════════
    ODA YÖNETİMİ — HİYERARŞİK BİNA → KAT → ODA
    ═══════════════════════════════════════════════════════════ */
@@ -1002,6 +1225,8 @@ tr:hover td { background: rgba(99,102,241,.04); }
 [data-theme="dark"] .sidebar-header { border-bottom-color:rgba(255,255,255,.07); }
 [data-theme="dark"] .sidebar-brand { border-bottom-color:rgba(255,255,255,.06); }
 [data-theme="dark"] .sidebar-brand-name { color:#a5b4fc; }
+[data-theme="dark"] .sidebar-signout { border-color:rgba(255,255,255,.12); color:rgba(255,255,255,.35); }
+[data-theme="dark"] .sidebar-signout:hover { background:rgba(99,102,241,.15); border-color:rgba(99,102,241,.4); color:#a5b4fc; }
 [data-theme="dark"] .user-av-dot { border-color:rgba(11,11,20,.92); }
 [data-theme="dark"] .user-name { color:#e2e8f0; }
 [data-theme="dark"] .nav-item { color:rgba(255,255,255,.5); }
@@ -1038,7 +1263,9 @@ tr:hover td { background: rgba(99,102,241,.04); }
 [data-theme="dark"] .rm-detail-modal { background:rgba(22,22,35,.97); box-shadow:0 24px 60px rgba(0,0,0,.5); }
 [data-theme="dark"] .modal h3 { color:#e2e8f0; }
 [data-theme="dark"] .modal-close { color:var(--text-muted); }
-[data-theme="dark"] .toast { background:rgba(22,22,35,.95); color:#fff; }
+[data-theme="dark"] .toast { background:rgba(18,18,30,.98); }
+[data-theme="dark"] .toast-title { color:#f1f5f9; }
+[data-theme="dark"] .toast-msg   { color:#94a3b8; }
 [data-theme="dark"] .btn-secondary { background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.09); }
 [data-theme="dark"] .btn-secondary:hover { background:rgba(99,102,241,.12); color:#c7d2fe; border-color:rgba(99,102,241,.3); }
 
@@ -1242,10 +1469,15 @@ tr.violation-row:hover td { background: rgba(239,68,68,.1) !important; }
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════
-     TOAST BİLDİRİM — İşlem sonuçlarını gösterir (sağ üst köşe)
-     JavaScript ile .show sınıfı eklenerek görünür yapılır.
+     MERKEZ UYARI KAPLAĞI + TOAST
      ═══════════════════════════════════════════════════════════ -->
-<div class="toast" id="toast"></div>
+<div class="toast-overlay" id="toastOverlay" onclick="hideAlert()"></div>
+<div class="toast" id="toast">
+  <div class="toast-icon"  id="toastIcon"></div>
+  <div class="toast-title" id="toastTitle"></div>
+  <div class="toast-msg"   id="toastMsg"></div>
+  <button class="toast-close" onclick="hideAlert()">Tamam</button>
+</div>
 
 <!-- ═══════════════════════════════════════════════════════════
      ANA SAYFA DÜZENI — SOL MENÜ + İÇERİK ALANI
@@ -1260,20 +1492,21 @@ tr.violation-row:hover td { background: rgba(239,68,68,.1) !important; }
   <aside class="sidebar">
     <!-- Sidebar Başlık: Sistem logosu + kullanıcı kartı -->
     <div class="sidebar-header">
-      <!-- Üst: Logo + sistem adı -->
+      <!-- Üst: Logo + sistem adı + çıkış butonu -->
       <div class="sidebar-brand">
         <img src="uni_logo.gif" alt="Logo" class="sidebar-logo">
         <div>
           <div class="sidebar-brand-name">🏠 Yurt Yönetim</div>
           <div class="sidebar-brand-sub">Yönetici Paneli</div>
         </div>
+        <button class="sidebar-signout" onclick="logout()" title="Oturumu Kapat">↪ Çıkış</button>
       </div>
       <!-- Alt: Giriş yapan kullanıcı kartı -->
       <div class="user-card">
         <div class="user-av" id="userAvatar">??<div class="user-av-dot"></div></div>
         <div class="user-info">
           <div class="user-name"  id="userName">Yükleniyor...</div>
-          <div class="user-email" id="userEmail">...</div>
+          <div class="user-email" id="userEmail" style="margin-top:2px">...</div>
           <span class="user-badge" id="userRole">Yönetici</span>
         </div>
       </div>
@@ -1590,11 +1823,24 @@ tr.violation-row:hover td { background: rgba(239,68,68,.1) !important; }
           </div>
         </div>
 
-        <div class="pf-grid gact">
+        <div class="pf-grid g3">
           <div class="pf-group">
+            <label>Ödeme Türü</label>
+            <select id="payType">
+              <option value="Tek seferlik">💳 Tek Seferlik</option>
+              <option value="Taksitli">📦 Taksitli</option>
+              <option value="Aylık">📅 Aylık</option>
+              <option value="Depozito">🔒 Depozito</option>
+              <option value="Ek ücret">⚠️ Ek Ücret / Ceza</option>
+              <option value="Kısmi">🔄 Kısmi Ödeme</option>
+            </select>
+          </div>
+          <div class="pf-group" style="grid-column: span 2">
             <label>Açıklama</label>
             <input type="text" id="payDescription" placeholder="Yurt ücreti, burs kesintisi...">
           </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:4px">
           <button class="pay-submit" onclick="createPayment()">➕ Kayıt Oluştur</button>
         </div>
       </div>
@@ -1648,27 +1894,47 @@ tr.violation-row:hover td { background: rgba(239,68,68,.1) !important; }
         </div>
       </div>
 
-      <!-- ── Ödeme Tablosu ── -->
+      <!-- ── Tüm Ödeme Kayıtları (Accordion) ── -->
       <div class="pay-table-card">
         <div class="pay-table-header">
           <h3>📃 Tüm Ödeme Kayıtları</h3>
           <button class="btn btn-secondary" onclick="loadPayments()" style="font-size:12px;padding:6px 14px;border-radius:9px">🔄 Yenile</button>
         </div>
-        <table class="pay-tbl">
-          <thead>
-            <tr>
-              <th>Öğrenci</th>
-              <th>Tutar</th>
-              <th>Durum</th>
-              <th>Vade Tarihi</th>
-              <th>Açıklama</th>
-              <th style="width:120px">İşlemler</th>
-            </tr>
-          </thead>
-          <tbody id="paymentTable">
-            <tr><td colspan="6" style="text-align:center;color:var(--text-dim);padding:40px">Yükleniyor...</td></tr>
-          </tbody>
-        </table>
+
+        <!-- Filtre Çubuğu -->
+        <div style="padding:12px 14px 0">
+          <div class="pay-filter-bar">
+            <span class="pay-filter-lbl">🔍</span>
+            <input type="text" id="payFilterSearch" placeholder="Öğrenci adı veya e-posta..."
+              oninput="filterPayments()" style="flex:1">
+            <select id="payFilterStatus" onchange="filterPayments()">
+              <option value="">Tüm Durumlar</option>
+              <option value="Beklemede">⏳ Beklemede</option>
+              <option value="Yaklaşan ödeme">⏰ Yaklaşan</option>
+              <option value="Ödendi">✅ Ödendi</option>
+              <option value="Kısmi ödendi">🔄 Kısmi Ödendi</option>
+              <option value="Gecikmiş">⚠️ Gecikmiş</option>
+            </select>
+            <select id="payFilterType" onchange="filterPayments()">
+              <option value="">Tüm Türler</option>
+              <option value="Tek seferlik">💳 Tek Seferlik</option>
+              <option value="Taksitli">📦 Taksitli</option>
+              <option value="Aylık">📅 Aylık</option>
+              <option value="Depozito">🔒 Depozito</option>
+              <option value="Ek ücret">⚠️ Ek Ücret</option>
+              <option value="Kısmi">🔄 Kısmi</option>
+            </select>
+            <button class="btn btn-secondary" onclick="clearPayFilters()" style="font-size:11px;padding:5px 12px;height:34px;border-radius:8px;white-space:nowrap">✕ Temizle</button>
+          </div>
+        </div>
+
+        <!-- Accordion Listesi -->
+        <div id="paymentAccordion" class="pay-acc-list">
+          <div style="text-align:center;padding:60px 20px;color:var(--text-dim)">
+            <div style="font-size:36px;margin-bottom:12px;opacity:.3">💳</div>
+            <div style="font-size:14px;font-weight:600">Yükleniyor...</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1686,11 +1952,10 @@ tr.violation-row:hover td { background: rgba(239,68,68,.1) !important; }
         </div>
         <div class="form-group">
           <label>Yeni Şifre</label>
-          <input type="password" id="newPass">
+          <input type="password" id="newPass" autocomplete="new-password" oninput="_pwStrength(this.value,'pwmSettings')">
+          <div id="pwmSettings" style="display:none;margin-top:8px;padding:10px;background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.12);border-radius:8px;"></div>
         </div>
         <button class="btn btn-primary" onclick="changePassword()">Güncelle</button>
-        <hr style="border-color:var(--border); margin:20px 0">
-        <button class="btn btn-danger" onclick="logout()" style="width:100%">🚪 Çıkış Yap</button>
       </div>
     </div>
 
@@ -1857,6 +2122,22 @@ tr.violation-row:hover td { background: rgba(239,68,68,.1) !important; }
       <label>Bölüm</label>
       <input type="text" id="newUserDept" placeholder="örn. Bilgisayar Mühendisliği">
     </div>
+    <div class="form-group" id="newUserFacultyGroup" style="display:none">
+      <label>Fakülte</label>
+      <input type="text" id="newUserFaculty" placeholder="örn. Mühendislik Fakültesi">
+    </div>
+    <div class="form-group" id="newUserClassYearGroup" style="display:none">
+      <label>Sınıf <small style="color:var(--text-muted)">(1 - 6)</small></label>
+      <select id="newUserClassYear">
+        <option value="">— Seçin —</option>
+        <option value="1">1. Sınıf</option>
+        <option value="2">2. Sınıf</option>
+        <option value="3">3. Sınıf</option>
+        <option value="4">4. Sınıf</option>
+        <option value="5">5. Sınıf</option>
+        <option value="6">6. Sınıf</option>
+      </select>
+    </div>
     <div class="form-group" id="newUserDeptGroup" style="display:none">
       <label>Öğrenci Numarası <small style="color:var(--text-muted)">(10-12 rakam)</small></label>
       <input type="text" id="newUserStudentNumber" placeholder="örn. 2026201001" maxlength="12">
@@ -1928,7 +2209,8 @@ tr.violation-row:hover td { background: rgba(239,68,68,.1) !important; }
     <p id="changeUserPasswordName" style="color:var(--text-muted);margin-bottom:14px;font-size:13px"></p>
     <div class="form-group">
       <label>Yeni Şifre</label>
-      <input type="password" id="changeUserPasswordInput" placeholder="Yeni şifre (en az 6 karakter)" autocomplete="new-password">
+      <input type="password" id="changeUserPasswordInput" placeholder="Yeni şifre (en az 6 karakter)" autocomplete="new-password" oninput="_pwStrength(this.value,'pwmModal')">
+      <div id="pwmModal" style="display:none;margin-top:8px;padding:10px;background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.12);border-radius:8px;"></div>
     </div>
     <div class="form-group">
       <label>Şifre Tekrar</label>
@@ -1951,6 +2233,17 @@ tr.violation-row:hover td { background: rgba(239,68,68,.1) !important; }
     <div class="form-group">
       <label>Tutar (₺)</label>
       <input type="number" id="editPayAmount" placeholder="Örn: 1500" min="1" step="0.01">
+    </div>
+    <div class="form-group">
+      <label>Ödeme Türü</label>
+      <select id="editPayType">
+        <option value="Tek seferlik">💳 Tek Seferlik</option>
+        <option value="Taksitli">📦 Taksitli</option>
+        <option value="Aylık">📅 Aylık</option>
+        <option value="Depozito">🔒 Depozito</option>
+        <option value="Ek ücret">⚠️ Ek Ücret / Ceza</option>
+        <option value="Kısmi">🔄 Kısmi Ödeme</option>
+      </select>
     </div>
     <div class="form-group">
       <label>Vade Tarihi</label>
@@ -1983,6 +2276,7 @@ tr.violation-row:hover td { background: rgba(239,68,68,.1) !important; }
       </div>
       <div style="display:flex;align-items:center;gap:10px">
         <span class="rm-dm-badge" id="rmDetailBadge">Boş</span>
+        <button class="btn btn-sm" style="padding:4px 10px;font-size:11px;background:rgba(99,102,241,.12);color:#4338ca;border:1px solid rgba(99,102,241,.25);border-radius:7px;cursor:pointer;font-weight:600" onclick="_rmOpenEditFromDetail()" title="Oda bilgilerini düzenle">✏️ Düzenle</button>
         <button class="modal-close" onclick="closeModal('rmDetail')" style="position:static;float:none;font-size:22px;line-height:1">&times;</button>
       </div>
     </div>
@@ -2123,11 +2417,20 @@ const token = localStorage.getItem('token');
 const userType = localStorage.getItem('user_type');
 
 // ─────────────────────────────────────────────
-// 2. TOKEN KONTROLÜ
+// 2. TOKEN ve ROL KONTROLÜ
 // ─────────────────────────────────────────────
 // Eğer token yoksa → kullanıcı giriş yapmamış demektir.
-// Hemen login sayfasına yönlendir.
+// Admin panel sadece Yönetici, Admin ve SuperAdmin rolleri tarafından erişilebilir.
 if (!token) {
+  window.location.href = 'index.html';
+}
+
+// Rol kontrolü: Sadece admin rolleri erişebilir
+const adminRoles = ['Yönetici', 'Admin', 'SuperAdmin'];
+if (!adminRoles.includes(userType)) {
+  alert('Bu panele erişim yetkiniz yok! Lütfen kendi panelinize giriş yapın.');
+  localStorage.removeItem('token');
+  localStorage.removeItem('user_type');
   window.location.href = 'index.html';
 }
 
@@ -2163,15 +2466,35 @@ async function apiFetch(url, options = {}) {
 }
 
 /**
- * showToast — Sağ üst köşede kısa bir bilgi mesajı gösterir.
- * 3 saniye sonra otomatik kaybolur.
- * @param {string} msg - Gösterilecek mesaj metni
+ * showToast — Ekranın ortasında dikkat çekici bir uyarı gösterir.
+ * Tür otomatik algılanır (mesaj başındaki emojiye göre).
+ * @param {string} msg  - Gösterilecek mesaj
+ * @param {string} type - 'success' | 'error' | 'warning' | 'info'
  */
-function showToast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 3000);
+function showToast(msg, type) {
+  if (!type) {
+    if      (msg.startsWith('✅')) type = 'success';
+    else if (msg.startsWith('❌')) type = 'error';
+    else if (msg.startsWith('⚠️')) type = 'warning';
+    else                           type = 'info';
+  }
+  const icons  = { success:'✅', error:'❌', warning:'⚠️', info:'ℹ️' };
+  const titles = { success:'Başarılı', error:'Hata', warning:'Uyarı', info:'Bilgi' };
+  const cleanMsg = msg.replace(/^[✅❌⚠️ℹ️]\s*/, '');
+  document.getElementById('toastIcon').textContent  = icons[type]  || 'ℹ️';
+  document.getElementById('toastTitle').textContent = titles[type] || 'Bilgi';
+  document.getElementById('toastMsg').textContent   = cleanMsg || msg;
+  document.getElementById('toast').className = 'toast show toast-' + type;
+  document.getElementById('toastOverlay').classList.add('show');
+  if (window._toastTimer) clearTimeout(window._toastTimer);
+  const duration = (type === 'error' || type === 'warning') ? 6000 : 4000;
+  window._toastTimer = setTimeout(hideAlert, duration);
+}
+
+function hideAlert() {
+  document.getElementById('toast').classList.remove('show');
+  document.getElementById('toastOverlay').classList.remove('show');
+  if (window._toastTimer) { clearTimeout(window._toastTimer); window._toastTimer = null; }
 }
 
 /**
@@ -2581,6 +2904,7 @@ function _rmSelectFloor(idx) {
 /** Oda detay modalını açar */
 let _rmCurrentRoomId   = null;
 let _rmCurrentBldGender = null; // 'male' | 'female' | null
+let _rmCurrentRoom      = null; // son açılan oda verisi (düzenleme için)
 
 /** Bina adından cinsiyet çıkarır */
 function _inferBldGender(name) {
@@ -2632,6 +2956,7 @@ async function _rmOpenModal(roomId) {
 
 /** Modal içeriğini (sakin listesi dahil) render eder */
 function _rmRenderModal(r) {
+  _rmCurrentRoom = r; // düzenleme için sakla
   const occ    = r.current_occupancy || 0;
   const cap    = r.capacity || 1;
   const pct    = Math.min(100, Math.round((occ / cap) * 100));
@@ -2850,6 +3175,12 @@ function openEditRoomModal(id, roomNumber, capacity) {
   openModal('editRoom');
 }
 
+/** Detay modalındaki Düzenle butonundan çağrılır */
+function _rmOpenEditFromDetail() {
+  if (!_rmCurrentRoomId || !_rmCurrentRoom) return;
+  openEditRoomModal(_rmCurrentRoomId, _rmCurrentRoom.room_number, _rmCurrentRoom.capacity || 2);
+}
+
 /** Oda günceller */
 async function submitEditRoom() {
   const id          = document.getElementById('editRoomId').value;
@@ -2871,6 +3202,12 @@ async function submitEditRoom() {
     showToast('✅ Oda güncellendi');
     loadRooms();
     if (_rmCurrentView === 'table') _rmLoadTable();
+    // Detay modalı açıksa yenile
+    const detailOverlay = document.getElementById('modal-rmDetail');
+    if (detailOverlay?.classList.contains('show') && _rmCurrentRoomId == id) {
+      const updated = await apiFetch(`/rooms/${id}`);
+      if (updated?.data) _rmRenderModal(updated.data);
+    }
   } else {
     showToast('❌ ' + (res?.message || 'Hata oluştu'));
   }
@@ -3184,54 +3521,214 @@ document.addEventListener('click', function(e) {
 async function loadPayments() {
   await loadStudentOptions();
 
-  const data = await apiFetch('/payments');
-  const list = data?.data || [];
-  const tbody = document.getElementById('paymentTable');
+  // Gruplu veri yükle
+  const data = await apiFetch('/payments/grouped');
+  _payGrouped = data?.data || [];
 
-  if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-dim);padding:48px"><div style="font-size:32px;margin-bottom:10px;opacity:.3">💳</div><div style="font-size:14px;font-weight:600">Ödeme kaydı yok</div><div style="font-size:12px;margin-top:4px;opacity:.7">Yukarıdaki formdan yeni kayıt oluşturun</div></td></tr>';
-  } else {
-    tbody.innerHTML = list.map(p => {
-      const initials   = ((p.first_name||'')[0]||'').toUpperCase() + ((p.last_name||'')[0]||'').toUpperCase();
-      const vadeTarihi = p.payment_date ? fmtDate(p.payment_date) : '-';
-      const isOverdue  = p.status === 'Gecikmiş';
-      const isPending  = p.status === 'Beklemede';
-      const badgeCls   = p.status === 'Ödendi' ? 'pay-bdg pay-bdg-ok' : isOverdue ? 'pay-bdg pay-bdg-ovd' : 'pay-bdg pay-bdg-pnd';
-      const dateCls    = isOverdue ? 'date-val late' : 'date-val';
-      const okBtn      = (isPending || isOverdue)
-        ? `<button class="row-btn row-btn-ok" onclick="markPaymentStatus(${p.id},'Ödendi')" title="Ödendi olarak işaretle">✓</button>`
-        : '';
-      return `<tr>
-        <td>
-          <div class="stu-cell">
-            <div class="stu-av">${initials}</div>
-            <div>
-              <div class="stu-nm">${p.first_name || ''} ${p.last_name || ''}</div>
-              <div class="stu-em">${p.email || ''}</div>
-            </div>
-          </div>
-        </td>
-        <td><span class="amt-val">${Number(p.amount || 0).toLocaleString('tr-TR')} ₺</span></td>
-        <td><span class="${badgeCls}">${p.status || '-'}</span></td>
-        <td><span class="${dateCls}">${vadeTarihi}</span></td>
-        <td style="color:var(--text-dim);font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${p.description || ''}">${p.description || '<span style="opacity:.3">—</span>'}</td>
-        <td>
-          <div class="row-acts">
-            ${okBtn}
-            <button class="row-btn row-btn-edit" onclick='openEditPaymentModal(${JSON.stringify(p)})' title="Düzenle">✏️</button>
-            <button class="row-btn row-btn-del"  onclick="deletePayment(${p.id})" title="Sil">🗑️</button>
-          </div>
-        </td>
-      </tr>`;
-    }).join('');
-  }
-
+  // Stats yükle
   const stats = await apiFetch('/payments/stats');
   const summary = stats?.data?.summary || {};
   document.getElementById('payStatTotal').textContent   = summary.total_records || 0;
   document.getElementById('payStatAmount').textContent  = Number(summary.paid_amount   || 0).toLocaleString('tr-TR') + ' ₺';
   document.getElementById('payStatUnpaid').textContent  = Number(summary.unpaid_amount || 0).toLocaleString('tr-TR') + ' ₺';
   document.getElementById('payStatOverdue').textContent = (summary.overdue_count || 0) + ' kayıt';
+
+  renderPaymentAccordion();
+}
+
+// Accordion render
+let _payGrouped = [];
+let _payOpenIds = new Set(); // Açık öğrencilerin user_id listesi
+
+function renderPaymentAccordion() {
+  const container = document.getElementById('paymentAccordion');
+  const search    = (document.getElementById('payFilterSearch')?.value || '').toLowerCase();
+  const statusF   = document.getElementById('payFilterStatus')?.value || '';
+  const typeF     = document.getElementById('payFilterType')?.value || '';
+
+  const filtered = _payGrouped.filter(g => {
+    if (search) {
+      const nm = `${g.first_name||''} ${g.last_name||''}`.toLowerCase();
+      if (!nm.includes(search) && !(g.email||'').toLowerCase().includes(search)) return false;
+    }
+    if (statusF && !(g.payments||[]).some(p => p.status === statusF)) return false;
+    if (typeF   && !(g.payments||[]).some(p => p.payment_type === typeF)) return false;
+    return true;
+  });
+
+  if (!filtered.length) {
+    container.innerHTML = `<div style="text-align:center;padding:60px 20px;color:var(--text-dim)">
+      <div style="font-size:38px;margin-bottom:12px;opacity:.3">💳</div>
+      <div style="font-size:14px;font-weight:600">Ödeme kaydı bulunamadı</div>
+      <div style="font-size:12px;margin-top:6px;opacity:.7">Filtre değiştirin veya yeni kayıt oluşturun</div>
+    </div>`;
+    return;
+  }
+
+  container.innerHTML = filtered.map(g => _buildAccordionCard(g)).join('');
+}
+
+function _badgeCls(status) {
+  if (status === 'Ödendi')         return 'pay-bdg pay-bdg-ok';
+  if (status === 'Gecikmiş')       return 'pay-bdg pay-bdg-ovd';
+  if (status === 'Kısmi ödendi')   return 'pay-bdg pay-bdg-partial';
+  if (status === 'Yaklaşan ödeme') return 'pay-bdg pay-bdg-upcoming';
+  return 'pay-bdg pay-bdg-pnd';
+}
+
+function _typeChip(type) {
+  const map = {
+    'Aylık':        'type-monthly',
+    'Depozito':     'type-deposit',
+    'Ek ücret':     'type-extra',
+    'Kısmi':        'type-partial',
+    'Taksitli':     'type-install',
+    'Tek seferlik': ''
+  };
+  const cls = map[type] || '';
+  return `<span class="ptype-chip ${cls}">${type||'Tek seferlik'}</span>`;
+}
+
+function _buildAccordionCard(g) {
+  const initials  = ((g.first_name||'')[0]||'').toUpperCase() + ((g.last_name||'')[0]||'').toUpperCase();
+  const totalDebt = Number(g.total_debt  || 0);
+  const paidAmt   = Number(g.paid_amount || 0);
+  const remaining = Number(g.remaining   || 0);
+  const pct       = totalDebt > 0 ? Math.min(100, Math.round(paidAmt / totalDebt * 100)) : 0;
+
+  const ovCnt  = Number(g.overdue_count  || 0);
+  const pndCnt = Number(g.pending_count  || 0);
+  const upcCnt = Number(g.upcoming_count || 0);
+  const prtCnt = Number(g.partial_count  || 0);
+  const paidCnt= Number(g.paid_count     || 0);
+
+  const hasOverdue  = ovCnt  > 0;
+  const hasUpcoming = upcCnt > 0 && !hasOverdue;
+  const isOpen      = _payOpenIds.has(g.user_id);
+
+  const cardCls = `pay-acc-card${hasOverdue ? ' has-overdue' : hasUpcoming ? ' has-upcoming' : ''}${isOpen ? ' open' : ''}`;
+  const fillCls = `pay-prog-fill${pct >= 100 ? ' fill-full' : hasOverdue ? ' fill-danger' : ''}`;
+
+  let badges = '';
+  if (ovCnt  > 0) badges += `<span class="pay-bdg pay-bdg-ovd">⚠️ ${ovCnt} Gecikmiş</span>`;
+  if (upcCnt > 0) badges += `<span class="pay-bdg pay-bdg-upcoming">⏰ ${upcCnt} Yaklaşan</span>`;
+  if (pndCnt > 0) badges += `<span class="pay-bdg pay-bdg-pnd">${pndCnt} Beklemede</span>`;
+  if (prtCnt > 0) badges += `<span class="pay-bdg pay-bdg-partial">${prtCnt} Kısmi</span>`;
+  if (paidCnt> 0) badges += `<span class="pay-bdg pay-bdg-ok">✓ ${paidCnt} Ödendi</span>`;
+
+  // Alt tablo satırları
+  const payments = g.payments || [];
+  const totalCount = payments.length;
+  const rows = payments.map(p => {
+    const rowCls   = p.status === 'Gecikmiş' ? 'row-overdue' : p.status === 'Yaklaşan ödeme' ? 'row-upcoming' : '';
+    const pAmt     = Number(p.amount || 0);
+    const pPaid    = Number(p.paid_amount || 0);
+    const pRem     = pAmt - pPaid;
+    const isOk     = p.status === 'Ödendi';
+    const canPay   = !isOk;
+    const vadeTar  = p.payment_date ? fmtDate(p.payment_date) : '—';
+    const dateStyle= p.status === 'Gecikmiş' ? 'color:#f87171;font-weight:700' : 'color:var(--text-muted)';
+
+    // Mini progress for partial
+    const rowPct   = pAmt > 0 && pPaid > 0 ? Math.min(100, Math.round(pPaid / pAmt * 100)) : 0;
+    const miniProg = (pPaid > 0 && !isOk)
+      ? `<div class="row-prog-bar"><div class="row-prog-fill" style="width:${rowPct}%"></div></div>`
+      : '';
+
+    const paidInfo = (pPaid > 0 && !isOk)
+      ? `<div style="font-size:10px;color:#34d399;margin-top:1px">Ödenen: ${pPaid.toLocaleString('tr-TR')} ₺</div>${miniProg}`
+      : '';
+
+    const okBtn  = canPay
+      ? `<button class="row-btn row-btn-ok"   onclick="event.stopPropagation();markPaymentStatus(${p.id},'Ödendi')" title="Ödendi olarak işaretle">✓</button>`
+      : '';
+    const editBtn= `<button class="row-btn row-btn-edit" onclick='event.stopPropagation();openEditPaymentModal(${JSON.stringify(p)})' title="Düzenle">✏️</button>`;
+    const delBtn = `<button class="row-btn row-btn-del"  onclick="event.stopPropagation();deletePayment(${p.id})" title="Sil">🗑️</button>`;
+
+    const remCell = isOk
+      ? `<span style="color:#34d399;font-weight:700">✓ Tam</span>`
+      : `<span style="color:${pRem > 0 ? '#f87171' : '#34d399'};font-weight:700">${pRem.toLocaleString('tr-TR')} ₺</span>`;
+
+    return `<tr class="${rowCls}">
+      <td>${_typeChip(p.payment_type)}</td>
+      <td>
+        <div style="font-weight:700;font-size:12px">${pAmt.toLocaleString('tr-TR')} ₺</div>
+        ${paidInfo}
+      </td>
+      <td><span class="${_badgeCls(p.status)}">${p.status}</span></td>
+      <td style="font-size:11px;${dateStyle}">${vadeTar}</td>
+      <td style="font-size:11px;color:var(--text-dim);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${p.description||''}">${p.description||'<span style="opacity:.3">—</span>'}</td>
+      <td>${remCell}</td>
+      <td><div class="row-acts">${okBtn}${editBtn}${delBtn}</div></td>
+    </tr>`;
+  }).join('');
+
+  const nextDue = g.next_due_date ? `<span style="font-size:10px;color:var(--text-dim);margin-left:6px">Son vade: ${fmtDate(g.next_due_date)}</span>` : '';
+
+  return `<div class="${cardCls}" id="pay-acc-${g.user_id}">
+    <div class="pay-acc-header" onclick="togglePayAcc(${g.user_id})">
+      <div class="stu-av">${initials}</div>
+      <div class="pay-acc-info">
+        <div class="pay-acc-name">${g.first_name||''} ${g.last_name||''} ${nextDue}</div>
+        <div class="pay-acc-email">${g.email||''}</div>
+        <div class="pay-acc-badges">${badges}</div>
+      </div>
+      <div class="pay-acc-stats">
+        <div class="pay-acc-stat">
+          <div class="pay-acc-stat-val">${totalDebt.toLocaleString('tr-TR')} ₺</div>
+          <div class="pay-acc-stat-lbl">Toplam</div>
+        </div>
+        <div class="pay-acc-stat">
+          <div class="pay-acc-stat-val clr-green">${paidAmt.toLocaleString('tr-TR')} ₺</div>
+          <div class="pay-acc-stat-lbl">Ödenen</div>
+        </div>
+        <div class="pay-acc-stat">
+          <div class="pay-acc-stat-val ${remaining > 0 ? 'clr-red' : 'clr-green'}">${remaining.toLocaleString('tr-TR')} ₺</div>
+          <div class="pay-acc-stat-lbl">Kalan</div>
+        </div>
+        <div class="pay-acc-stat">
+          <div class="pay-acc-stat-val">${paidCnt}/${totalCount}</div>
+          <div class="pay-acc-stat-lbl">Taksit</div>
+        </div>
+        <div class="pay-prog-wrap">
+          <div class="pay-prog-bar"><div class="${fillCls}" style="width:${pct}%"></div></div>
+          <div class="pay-prog-pct">%${pct} ödendi</div>
+        </div>
+      </div>
+      <div class="pay-acc-chevron">▼</div>
+    </div>
+    <div class="pay-acc-detail">
+      <table class="pay-sub-tbl">
+        <thead>
+          <tr>
+            <th>Tür</th><th>Tutar</th><th>Durum</th>
+            <th>Vade Tarihi</th><th>Açıklama</th>
+            <th>Kalan Borç</th><th style="width:80px">İşlem</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows || '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-dim)">Kayıt yok</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function togglePayAcc(userId) {
+  const card = document.getElementById(`pay-acc-${userId}`);
+  if (!card) return;
+  const isOpen = card.classList.toggle('open');
+  if (isOpen) _payOpenIds.add(userId);
+  else        _payOpenIds.delete(userId);
+}
+
+function filterPayments() { renderPaymentAccordion(); }
+
+function clearPayFilters() {
+  document.getElementById('payFilterSearch').value  = '';
+  document.getElementById('payFilterStatus').value  = '';
+  document.getElementById('payFilterType').value    = '';
+  renderPaymentAccordion();
 }
 
 async function markPaymentStatus(id, status) {
@@ -3248,16 +3745,17 @@ async function markPaymentStatus(id, status) {
 }
 
 async function createPayment() {
-  const user_id     = document.getElementById('payUserId').value.trim();
-  const amount      = document.getElementById('payAmount').value.trim();
-  const due_date    = document.getElementById('payDueDate').value.trim();
-  const description = document.getElementById('payDescription').value.trim();
+  const user_id      = document.getElementById('payUserId').value.trim();
+  const amount       = document.getElementById('payAmount').value.trim();
+  const due_date     = document.getElementById('payDueDate').value.trim();
+  const description  = document.getElementById('payDescription').value.trim();
+  const payment_type = document.getElementById('payType').value;
 
-  if (!user_id)                                       { showToast('Önce bir öğrenci seçin'); return; }
-  if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) { showToast('Geçerli bir tutar girin (> 0)'); return; }
-  if (!due_date)                                      { showToast('Vade tarihi zorunludur'); return; }
+  if (!user_id)                                                     { showToast('Önce bir öğrenci seçin'); return; }
+  if (!amount || isNaN(Number(amount)) || Number(amount) <= 0)      { showToast('Geçerli bir tutar girin (> 0)'); return; }
+  if (!due_date)                                                     { showToast('Vade tarihi zorunludur'); return; }
 
-  const body = { user_id: parseInt(user_id), amount: parseFloat(amount), status: 'Beklemede', due_date };
+  const body = { user_id: parseInt(user_id), amount: parseFloat(amount), status: 'Beklemede', due_date, payment_type };
   if (description) body.description = description;
 
   const res = await apiFetch('/payments', { method: 'POST', body: JSON.stringify(body) });
@@ -3267,6 +3765,7 @@ async function createPayment() {
     document.getElementById('payAmount').value      = '';
     document.getElementById('payDueDate').value     = '';
     document.getElementById('payDescription').value = '';
+    document.getElementById('payType').value        = 'Tek seferlik';
     clearStudentPick('pay');
     loadPayments();
   } else {
@@ -3281,16 +3780,16 @@ async function createMonthlyInstallments() {
   const months      = document.getElementById('miMonths').value.trim();
   const description = document.getElementById('miDescription').value.trim();
 
-  if (!user_id)    { showToast('Önce bir öğrenci seçin'); return; }
-  if (!amount)     { showToast('Aylık tutar zorunludur'); return; }
-  if (!start_date) { showToast('Başlangıç tarihi zorunludur'); return; }
-  if (!months || Number(months) < 1) { showToast('Geçerli bir ay sayısı girin'); return; }
+  if (!user_id)                              { showToast('Önce bir öğrenci seçin'); return; }
+  if (!amount)                               { showToast('Aylık tutar zorunludur'); return; }
+  if (!start_date)                           { showToast('Başlangıç tarihi zorunludur'); return; }
+  if (!months || Number(months) < 1)         { showToast('Geçerli bir ay sayısı girin'); return; }
 
   const body = {
-    user_id: parseInt(user_id),
-    amount:  parseFloat(amount),
+    user_id:     parseInt(user_id),
+    amount:      parseFloat(amount),
     start_date,
-    months:  parseInt(months)
+    months:      parseInt(months)
   };
   if (description) body.description = description;
 
@@ -3324,22 +3823,23 @@ async function deletePayment(id) {
 function openEditPaymentModal(p) {
   document.getElementById('editPaymentId').value      = p.id;
   document.getElementById('editPayAmount').value      = p.amount;
+  document.getElementById('editPayType').value        = p.payment_type || 'Tek seferlik';
   document.getElementById('editPayDueDate').value     = p.payment_date ? p.payment_date.split('T')[0] : '';
   document.getElementById('editPayDescription').value = p.description || '';
   openModal('editPayment');
 }
 
 async function updatePayment() {
-  const id          = document.getElementById('editPaymentId').value;
-  const amount      = document.getElementById('editPayAmount').value.trim();
-  const due_date    = document.getElementById('editPayDueDate').value.trim();
-  const description = document.getElementById('editPayDescription').value.trim();
+  const id           = document.getElementById('editPaymentId').value;
+  const amount       = document.getElementById('editPayAmount').value.trim();
+  const payment_type = document.getElementById('editPayType').value;
+  const due_date     = document.getElementById('editPayDueDate').value.trim();
+  const description  = document.getElementById('editPayDescription').value.trim();
 
   if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) { showToast('Geçerli bir tutar girin (> 0)'); return; }
 
-  const body = { amount: parseFloat(amount) };
-  if (due_date)    body.due_date    = due_date;
-  if (description !== undefined) body.description = description;
+  const body = { amount: parseFloat(amount), payment_type, description };
+  if (due_date) body.due_date = due_date;
 
   const res = await apiFetch(`/payments/${id}`, { method: 'PUT', body: JSON.stringify(body) });
   if (res?.success) {
@@ -3375,12 +3875,39 @@ async function changePassword() {
   // Formu temizler
   document.getElementById('oldPass').value = '';
   document.getElementById('newPass').value = '';
+  _pwStrength('', 'pwmSettings');
 }
 
 /**
  * logout — Oturumu kapatır.
  * localStorage'dan token ve user_type'ı siler, login sayfasına yönlendirir.
  */
+function _pwStrength(val, meterId) {
+  const el = document.getElementById(meterId);
+  if (!el) return;
+  if (!val) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  const rules = [
+    { label: 'En az 8 karakter',       ok: val.length >= 8 },
+    { label: 'Büyük harf (A-Z)',        ok: /[A-Z]/.test(val) },
+    { label: 'Küçük harf (a-z)',        ok: /[a-z]/.test(val) },
+    { label: 'Rakam (0-9)',             ok: /[0-9]/.test(val) },
+    { label: 'Özel karakter (!@#$...)', ok: /[^A-Za-z0-9]/.test(val) },
+  ];
+  const score = rules.filter(r => r.ok).length;
+  const clr = ['#ef4444','#ef4444','#f59e0b','#f59e0b','#10b981','#10b981'][score];
+  const lbl = ['Çok Zayıf','Çok Zayıf','Zayıf','Orta','Güçlü','Çok Güçlü'][score];
+  const bar = Array.from({length:4}, (_,i) =>
+    `<div style="flex:1;height:5px;border-radius:3px;background:${i < score ? clr : 'rgba(99,102,241,.12)'}"></div>`
+  ).join('');
+  el.innerHTML = `
+    <div style="display:flex;gap:4px;margin-bottom:5px">${bar}</div>
+    <div style="font-size:11px;font-weight:700;color:${clr};margin-bottom:5px">${lbl}</div>
+    <div style="font-size:11px;line-height:2;display:flex;flex-wrap:wrap;gap:0 14px">${rules.map(r =>
+      `<span style="color:${r.ok ? '#10b981' : '#ef4444'}">${r.ok ? '✓' : '✗'} ${r.label}</span>`
+    ).join('')}</div>`;
+}
+
 function logout() {
   localStorage.removeItem('token');
   localStorage.removeItem('user_type');
@@ -3409,10 +3936,31 @@ document.addEventListener('DOMContentLoaded', () => {
 // 14. KULLANICILAR & ROLLER — Admin paneli
 // ─────────────────────────────────────────────
 async function loadUsersWithRoles() {
-  const data = await apiFetch('/admin/users');
-  const list = Array.isArray(data) ? data : (data?.users || data?.data || []);
   const tbody = document.getElementById('usersTable');
   if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim)">Yükleniyor...</td></tr>';
+
+  const data = await apiFetch('/admin/users');
+  if (!data) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim)">Veri alınamadı</td></tr>';
+    return;
+  }
+  let list = Array.isArray(data) ? data : (data?.users || data?.data || []);
+
+  // Frontend filtreleme:
+  //  - belek05 ile başlayan e-posta hiçbir zaman gösterilmez
+  //  - Yönetici rolüyse Admin + SuperAdmin kullanıcıları gizlenir
+  const myRole  = localStorage.getItem('user_type') || '';
+  const hiddenRoles = ['Admin', 'SuperAdmin', 'admin', 'superadmin'];
+  const isAdmin = ['Admin', 'SuperAdmin'].includes(myRole);
+  list = list.filter(u => {
+    // Admin her şeyi görebilir; Yönetici belek05 ve Admin/SuperAdmin rollerini göremez
+    if (!isAdmin && u.email && u.email.toLowerCase().startsWith('belek05')) return false;
+    if (myRole === 'Yönetici' && hiddenRoles.includes(u.role || u.user_type || '')) return false;
+    if (u.is_active === false || u.is_active === 'false') return false;
+    return true;
+  });
+
   if (list.length === 0) {
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim)">Kullanıcı bulunamadı</td></tr>';
     return;
@@ -3441,6 +3989,12 @@ async function createUser() {
   const gender          = document.getElementById('newUserGender').value || null;
   const department      = role === 'Öğrenci'
     ? (document.getElementById('newUserDept').value.trim() || null)
+    : null;
+  const faculty         = role === 'Öğrenci'
+    ? (document.getElementById('newUserFaculty').value.trim() || null)
+    : null;
+  const class_year      = role === 'Öğrenci'
+    ? (document.getElementById('newUserClassYear').value || null)
     : null;
   const student_number  = role === 'Öğrenci'
     ? (document.getElementById('newUserStudentNumber').value.trim() || null)
@@ -3480,7 +4034,7 @@ async function createUser() {
 
   const res = await apiFetch('/admin/users', {
     method: 'POST',
-    body: JSON.stringify({ first_name, last_name, email, password, role, gender, department, student_number })
+    body: JSON.stringify({ first_name, last_name, email, password, role, gender, department, faculty, class_year, student_number })
   });
 
   if (res && res.success) {
@@ -3491,10 +4045,14 @@ async function createUser() {
     document.getElementById('newUserPassword').value       = '';
     document.getElementById('newUserGender').value         = '';
     document.getElementById('newUserDept').value           = '';
+    document.getElementById('newUserFaculty').value        = '';
+    document.getElementById('newUserClassYear').value      = '';
     document.getElementById('newUserStudentNumber').value  = '';
-    document.getElementById('newUserStudentFields').style.display = 'none';
-    document.getElementById('newUserDeptGroup').style.display     = 'none';
-    showToast('Kullanıcı oluşturuldu');
+    document.getElementById('newUserStudentFields').style.display  = 'none';
+    document.getElementById('newUserFacultyGroup').style.display   = 'none';
+    document.getElementById('newUserClassYearGroup').style.display = 'none';
+    document.getElementById('newUserDeptGroup').style.display      = 'none';
+    showToast('✅ Kullanıcı oluşturuldu');
     loadUsersWithRoles();
   } else {
     showToast(res?.message || 'Hata oluştu');
@@ -3504,10 +4062,14 @@ async function createUser() {
 // Yeni kullanıcı modalinda rol değişince öğrenci alanlarını göster/gizle
 function _onNewUserRoleChange(role) {
   const show = role === 'Öğrenci';
-  document.getElementById('newUserStudentFields').style.display = show ? '' : 'none';
-  document.getElementById('newUserDeptGroup').style.display     = show ? '' : 'none';
+  document.getElementById('newUserStudentFields').style.display  = show ? '' : 'none';
+  document.getElementById('newUserFacultyGroup').style.display   = show ? '' : 'none';
+  document.getElementById('newUserClassYearGroup').style.display = show ? '' : 'none';
+  document.getElementById('newUserDeptGroup').style.display      = show ? '' : 'none';
   if (!show) {
     document.getElementById('newUserDept').value          = '';
+    document.getElementById('newUserFaculty').value       = '';
+    document.getElementById('newUserClassYear').value     = '';
     document.getElementById('newUserStudentNumber').value = '';
   }
 }
@@ -3524,6 +4086,7 @@ function openChangePasswordModal(userId, userName) {
   document.getElementById('changeUserPasswordName').textContent = 'Kullanıcı: ' + userName;
   document.getElementById('changeUserPasswordInput').value = '';
   document.getElementById('changeUserPasswordConfirm').value = '';
+  _pwStrength('', 'pwmModal');
   openModal('changeUserPassword');
 }
 
@@ -3578,10 +4141,21 @@ async function deleteUser(userId, userName) {
   const res = await apiFetch('/admin/users/' + userId, { method: 'DELETE' });
 
   if (res && res.success) {
-    showToast('Kullanıcı silindi');
-    loadUsersWithRoles();
+    showToast('✅ Kullanıcı silindi');
+    // Satırı DOM'dan hemen kaldır
+    const tbody = document.getElementById('usersTable');
+    if (tbody) {
+      const rows = tbody.querySelectorAll('tr');
+      rows.forEach(row => {
+        if (row.innerHTML.includes('deleteUser(' + userId + ',') || row.innerHTML.includes("deleteUser(" + userId + ",")) {
+          row.remove();
+        }
+      });
+    }
+    // Listeyi sunucudan yenile
+    await loadUsersWithRoles();
   } else {
-    showToast(res?.message || 'Silme işlemi başarısız');
+    showToast('❌ ' + (res?.message || 'Silme işlemi başarısız'));
   }
 }
 
@@ -3589,11 +4163,17 @@ async function deleteUser(userId, userName) {
 function loadUsers() { loadUsersWithRoles(); }
 function addUser()   { openAddUserModal(); }
 function openAddUserModal() {
-  // Bölüm dropdown'unu sıfırla ki yeni yüklensin
-  const sel = document.getElementById('newUserDept');
-  while (sel.options.length > 1) sel.remove(1);
+  // Formu temizle
+  ['newUserFirstName','newUserLastName','newUserEmail','newUserPassword','newUserDept','newUserStudentNumber'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const roleEl = document.getElementById('newUserRole');
+  if (roleEl) roleEl.value = 'Öğrenci';
+  const genderEl = document.getElementById('newUserGender');
+  if (genderEl) genderEl.value = '';
   openModal('addUser');
-  _onNewUserRoleChange(document.getElementById('newUserRole').value || 'Öğrenci');
+  _onNewUserRoleChange('Öğrenci');
 }
 
 
@@ -3617,10 +4197,23 @@ function _destroyRptCharts() {
   _rptCharts = {};
 }
 
+// Canvas yerine "veri yok" mesajı göster
+function _noDataChart(id, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const parent = el.parentElement;
+  if (parent) parent.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;min-height:80px;color:var(--text-muted);font-size:13px;flex-direction:column;gap:6px"><span style="font-size:22px">📭</span>${msg || 'Henüz veri yok'}</div>`;
+}
+
 // Grafik oluşturma yardımcısı
 function _makeChart(id, type, labels, datasets, extraOpts = {}) {
   const ctx = document.getElementById(id);
-  if (!ctx || typeof Chart === 'undefined') return null;
+  if (!ctx) return null;
+  if (typeof Chart === 'undefined') {
+    console.error('Chart.js yüklenmedi! Grafik oluşturulamıyor:', id);
+    ctx.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">⚠️ Grafik kütüphanesi yüklenemedi</div>';
+    return null;
+  }
   if (_rptCharts[id]) { try { _rptCharts[id].destroy(); } catch(_) {} }
   _rptCharts[id] = new Chart(ctx, {
     type,
@@ -3698,7 +4291,7 @@ async function rptRenderOverview() {
 
   // ── Monthly revenue series (last 12 months) ─────────────────────
   // Build a full 12-month array so gaps show as 0
-  const monthlyRevData = _buildMonthSeries(rev.monthly_revenue || [], 12);
+  const monthlyRevData = _buildMonthSeries(rev.monthly_revenue || [], 12, rev.monthly_pending || []);
 
   // ── Occupancy per building ───────────────────────────────────────
   const bldgLabels = b.map(x => x.building_name || x.name || '—');
@@ -3866,33 +4459,40 @@ async function rptRenderOverview() {
           scales: { x: { beginAtZero: true, title: { display: true, text: 'Kişi sayısı', font:{ size:11 } } } }
         }
       );
+    } else {
+      _noDataChart('rpt-ov-occ', 'Bina verisi bulunamadı');
     }
 
     // 3) Monthly revenue — area line chart
-    _makeChart('rpt-ov-revenue', 'line',
-      monthlyRevData.labels,
-      [
-        { label: 'Tahsilat (₺)', data: monthlyRevData.revenue,
-          borderColor: '#10b981', backgroundColor: '#10b98120',
-          borderWidth: 2.5, tension: 0.4, fill: true, pointRadius: 4,
-          pointBackgroundColor: '#10b981' },
-        { label: 'Bekleyen (₺)', data: monthlyRevData.pending,
-          borderColor: '#f59e0b', backgroundColor: '#f59e0b15',
-          borderWidth: 2, tension: 0.4, fill: true, pointRadius: 3,
-          borderDash: [4,3], pointBackgroundColor: '#f59e0b' }
-      ],
-      {
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { display: false } },
-          y: {
-            beginAtZero: true,
-            ticks: { callback: v => v >= 1000 ? (v/1000).toFixed(0)+'k₺' : v+'₺' }
+    const hasRevData = monthlyRevData.revenue.some(v => v > 0) || monthlyRevData.pending.some(v => v > 0);
+    if (hasRevData) {
+      _makeChart('rpt-ov-revenue', 'line',
+        monthlyRevData.labels,
+        [
+          { label: 'Tahsilat (₺)', data: monthlyRevData.revenue,
+            borderColor: '#10b981', backgroundColor: '#10b98120',
+            borderWidth: 2.5, tension: 0.4, fill: true, pointRadius: 4,
+            pointBackgroundColor: '#10b981' },
+          { label: 'Bekleyen (₺)', data: monthlyRevData.pending,
+            borderColor: '#f59e0b', backgroundColor: '#f59e0b15',
+            borderWidth: 2, tension: 0.4, fill: true, pointRadius: 3,
+            borderDash: [4,3], pointBackgroundColor: '#f59e0b' }
+        ],
+        {
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { display: false } },
+            y: {
+              beginAtZero: true,
+              ticks: { callback: v => v >= 1000 ? (v/1000).toFixed(0)+'k₺' : v+'₺' }
+            }
           }
         }
-      }
-    );
-  }, 60);
+      );
+    } else {
+      _noDataChart('rpt-ov-revenue', 'Henüz ödeme verisi yok');
+    }
+  }, 150);
 }
 
 // Gender doughnut + custom legend
@@ -3950,8 +4550,10 @@ function _renderGenderChart(genderRows) {
 }
 
 // Build a complete 12-month series with zero-fill for missing months
-function _buildMonthSeries(revenueRows, months) {
-  const pending = _rptPendingSeriesCache || [];
+// revenueRows: [ { month: 'YYYY-MM', revenue: '...' } ]
+// pendingRows : [ { month: 'YYYY-MM', amount:  '...' } ]  (optional)
+function _buildMonthSeries(revenueRows, months, pendingRows) {
+  pendingRows = pendingRows || _rptPendingSeriesCache || [];
   const labels  = [];
   const revenue = [];
   const pendingData = [];
@@ -3964,10 +4566,11 @@ function _buildMonthSeries(revenueRows, months) {
     const key  = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
     const lbl  = trMonths[d.getMonth()] + ' ' + String(d.getFullYear()).slice(2);
 
-    const revRow = revenueRows.find(r => r.month === key);
+    const revRow  = revenueRows.find(r => r.month === key);
+    const penRow  = pendingRows.find(r => r.month === key);
     labels.push(lbl);
     revenue.push(revRow ? parseFloat(revRow.revenue) : 0);
-    pendingData.push(0); // pending series unused in this view
+    pendingData.push(penRow ? parseFloat(penRow.amount) : 0);
   }
   return { labels, revenue, pending: pendingData };
 }
@@ -4108,7 +4711,10 @@ async function rptRenderOccupancy() {
 
   // Grafik çiz
   setTimeout(() => {
-    if (!rows.length) return;
+    if (!rows.length) {
+      _noDataChart('rpt-occ-bar', 'Kat verisi bulunamadı');
+      return;
+    }
     const buildings = [...new Set(rows.map(r => r.building_name))];
     const floors    = [...new Set(rows.map(r => r.floor))].sort((a,b) => a - b);
     const datasets  = buildings.map((bldg, i) => ({
@@ -4125,7 +4731,7 @@ async function rptRenderOccupancy() {
       floors.map(f => f + '. Kat'), datasets,
       { scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } } }
     );
-  }, 60);
+  }, 150);
 
   // Oda verilerini global olarak sakla (filtre için)
   window._occRooms = rooms;
@@ -4194,7 +4800,7 @@ async function rptRenderStudents() {
   const noGenderN  = go.no_gender_count || 0;
   const vCount     = go.violation_count || violations.length;
 
-  const demo   = demoData?.data || {};
+  const demo   = demoData?.data || demoData || {};
   const cls    = demo.by_class  || [];
   const faculty= demo.by_faculty|| [];
 
@@ -4417,6 +5023,8 @@ async function rptRenderStudents() {
         ],
         { scales: { y: { beginAtZero: true, title:{ display:true, text:'Kişi sayısı', font:{size:11} } } } }
       );
+    } else {
+      _noDataChart('rpt-stu-block-bar', 'Bina verisi yok');
     }
 
     // 3) Class bar
@@ -4427,21 +5035,25 @@ async function rptRenderStudents() {
            backgroundColor:'#6366f1cc', borderColor:'#6366f1', borderWidth:1, borderRadius:6 }],
         { plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true, ticks:{stepSize:1} } } }
       );
+    } else {
+      _noDataChart('rpt-stu-class-bar', 'Sınıf verisi yok');
     }
 
     // 4) Faculty bar (horizontal, top 10)
     if (faculty.length) {
       const top10 = faculty.slice(0,10);
       _makeChart('rpt-stu-faculty-bar', 'bar',
-        top10.map(f=>f.faculty||'Bilinmiyor'),
+        top10.map(f=>f.faculty||'Diğer'),
         [{ label:'Öğrenci', data:top10.map(f=>parseInt(f.count)),
            backgroundColor: top10.map((_,i)=>RPT_PALETTE[i%RPT_PALETTE.length]+'cc'),
            borderColor:     top10.map((_,i)=>RPT_PALETTE[i%RPT_PALETTE.length]),
            borderWidth:1, borderRadius:4 }],
         { indexAxis:'y', plugins:{ legend:{ display:false } }, scales:{ x:{ beginAtZero:true } } }
       );
+    } else {
+      _noDataChart('rpt-stu-faculty-bar', 'Fakülte verisi yok');
     }
-  }, 60);
+  }, 150);
 }
 
 // ── Sekme 4: Ödemeler ─────────────────────────────────────────────
@@ -4636,14 +5248,18 @@ async function rptRenderPayments() {
   // ── Charts ─────────────────────────────────────────────────────
   setTimeout(() => {
     // 1. Monthly revenue area line
-    _makeChart('rpt-pay-monthly-line', 'line',
-      revData.labels,
-      [{ label: 'Tahsilat (₺)', data: revData.revenue,
-         borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.12)',
-         fill: true, tension: 0.4, pointRadius: 3, borderWidth: 2 }],
-      { plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true, ticks: { callback: v => v.toLocaleString('tr-TR') } } } }
-    );
+    if (revData.revenue.some(v => v > 0)) {
+      _makeChart('rpt-pay-monthly-line', 'line',
+        revData.labels,
+        [{ label: 'Tahsilat (₺)', data: revData.revenue,
+           borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.12)',
+           fill: true, tension: 0.4, pointRadius: 3, borderWidth: 2 }],
+        { plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true, ticks: { callback: v => v.toLocaleString('tr-TR') } } } }
+      );
+    } else {
+      _noDataChart('rpt-pay-monthly-line', 'Henüz tahsilat verisi yok');
+    }
 
     // 2. Paid vs Unpaid vs No-record students doughnut
     const studentData   = [paidStudents, unpaidStudents, noPayment];
@@ -4685,6 +5301,8 @@ async function rptRenderPayments() {
         { scales: { x: { stacked: false }, y: { beginAtZero: true,
             ticks: { callback: v => v.toLocaleString('tr-TR') } } } }
       );
+    } else {
+      _noDataChart('rpt-pay-period-bar', 'Dönem verisi yok');
     }
 
     // 4. Payment method doughnut
@@ -4700,8 +5318,10 @@ async function rptRenderPayments() {
             tooltip: { callbacks: { label: ctx =>
               ` ${ctx.label}: ${Number(ctx.parsed).toLocaleString('tr-TR')}₺` } } } }
       );
+    } else {
+      _noDataChart('rpt-pay-method-pie', 'Ödeme yöntemi verisi yok');
     }
-  }, 60);
+  }, 150);
 }
 
 // ── Sekme 5: Talepler ─────────────────────────────────────────────
@@ -4769,7 +5389,11 @@ async function rptRenderComplaints() {
   `;
 
   setTimeout(() => {
-    if (!rows.length) return;
+    if (!rows.length) {
+      _noDataChart('rpt-comp-bar', 'Henüz talep verisi yok');
+      _noDataChart('rpt-resolve-bar', 'Henüz talep verisi yok');
+      return;
+    }
     _makeChart('rpt-comp-bar', 'bar',
       rows.map(r => r.category||'Diğer'),
       [
@@ -4787,7 +5411,7 @@ async function rptRenderComplaints() {
          borderWidth: 1, borderRadius: 4 }],
       { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v+'%' } } } }
     );
-  }, 60);
+  }, 150);
 }
 
 // ── Sekme 6: Giriş-Çıkış ─────────────────────────────────────────
@@ -4856,6 +5480,8 @@ async function rptRenderEntryExit(days) {
         ],
         { scales: { y: { beginAtZero: true } } }
       );
+    } else {
+      _noDataChart('rpt-daily-line', 'Giriş-çıkış kaydı yok');
     }
     if (hourly.length) {
       const allHours = Array.from({length:24},(_,i)=>i);
@@ -4868,6 +5494,8 @@ async function rptRenderEntryExit(days) {
         ],
         { scales: { y: { beginAtZero: true } } }
       );
+    } else {
+      _noDataChart('rpt-hourly-bar', 'Bugün giriş-çıkış yok');
     }
     if (byGate.length) {
       _makeChart('rpt-gate-pie', 'doughnut',
@@ -4876,8 +5504,10 @@ async function rptRenderEntryExit(days) {
            backgroundColor: RPT_PALETTE.slice(0,byGate.length).map(x=>x+'cc'),
            borderColor: RPT_PALETTE.slice(0,byGate.length), borderWidth:2 }]
       );
+    } else {
+      _noDataChart('rpt-gate-pie', 'Kapı verisi yok');
     }
-  }, 60);
+  }, 150);
 }
 
 // ─────────────────────────────────────────────
@@ -4908,6 +5538,6 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 </script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
 </body>
 </html>

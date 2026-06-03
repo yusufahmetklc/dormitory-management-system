@@ -1443,7 +1443,7 @@ function renderSettings(main) {
     <div class="card" style="max-width:400px">
       <h3 style="margin-bottom:16px">Şifre Değiştir</h3>
       <div class="form-group"><label>Mevcut Şifre</label><input type="password" id="old-pass"></div>
-      <div class="form-group"><label>Yeni Şifre</label><input type="password" id="new-pass"></div>
+      <div class="form-group"><label>Yeni Şifre</label><input type="password" id="new-pass" autocomplete="new-password" oninput="_pwStrength(this.value,'pwmDash')"><div id="pwmDash" style="display:none;margin-top:8px;padding:10px;background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.12);border-radius:8px;"></div></div>
       <button class="btn btn-primary" onclick="changePassword()">Güncelle</button>
     </div>
   `;
@@ -1463,6 +1463,33 @@ async function changePassword() {
   showToast(res?.message || 'Şifre güncellendi');
   document.getElementById('old-pass').value = '';
   document.getElementById('new-pass').value = '';
+  _pwStrength('', 'pwmDash');
+}
+
+function _pwStrength(val, meterId) {
+  const el = document.getElementById(meterId);
+  if (!el) return;
+  if (!val) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  const rules = [
+    { label: 'En az 8 karakter',       ok: val.length >= 8 },
+    { label: 'Büyük harf (A-Z)',        ok: /[A-Z]/.test(val) },
+    { label: 'Küçük harf (a-z)',        ok: /[a-z]/.test(val) },
+    { label: 'Rakam (0-9)',             ok: /[0-9]/.test(val) },
+    { label: 'Özel karakter (!@#$...)', ok: /[^A-Za-z0-9]/.test(val) },
+  ];
+  const score = rules.filter(r => r.ok).length;
+  const clr = ['#ef4444','#ef4444','#f59e0b','#f59e0b','#10b981','#10b981'][score];
+  const lbl = ['Çok Zayıf','Çok Zayıf','Zayıf','Orta','Güçlü','Çok Güçlü'][score];
+  const bar = Array.from({length:4}, (_,i) =>
+    `<div style="flex:1;height:5px;border-radius:3px;background:${i < score ? clr : 'rgba(99,102,241,.12)'}"></div>`
+  ).join('');
+  el.innerHTML = `
+    <div style="display:flex;gap:4px;margin-bottom:5px">${bar}</div>
+    <div style="font-size:11px;font-weight:700;color:${clr};margin-bottom:5px">${lbl}</div>
+    <div style="font-size:11px;line-height:2;display:flex;flex-wrap:wrap;gap:0 14px">${rules.map(r =>
+      `<span style="color:${r.ok ? '#10b981' : '#ef4444'}">${r.ok ? '✓' : '✗'} ${r.label}</span>`
+    ).join('')}</div>`;
 }
 
 // ── Logout ────────────────────────────────────────────────────────

@@ -14,6 +14,8 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const pool = require("../config/db");
 const { authenticateToken, authorizeRole } = require("../middleware/auth");
+const { softDelete, softRestore } = require("../middleware/softDelete");
+const { usersReady } = require("../middleware/softDeleteReady");
 
 const router = express.Router();
 
@@ -54,7 +56,7 @@ router.post("/users",
   authenticateToken,
   authorizeRole("Yönetici", "Admin", "SuperAdmin"),
   async (req, res) => {
-    let { first_name, last_name, email, password, role, gender, department, student_number } = req.body || {};
+    let { first_name, last_name, email, password, role, gender, department, student_number, faculty, class_year } = req.body || {};
 
     if (!first_name || !last_name || !email || !password || !role) {
       return res.status(400).json({ success: false, message: "Tüm alanlar zorunludur" });
@@ -109,19 +111,31 @@ router.post("/users",
         "SELECT user_id FROM user_schemas WHERE schema_name = CURRENT_USER LIMIT 1"
       );
       const createdBy = schemaRow.rows[0]?.user_id ?? null;
-      console.log('RLS createdBy:', createdBy, '| CURRENT_USER için user_schemas satırı:', schemaRow.rows);
 
       const password_hash = await bcrypt.hash(password, 10);
       const username = email.split("@")[0];
 
-      // Öğrenci için bölüm adı ve öğrenci numarası üret
-      let department    = null;
-      let student_number = null;
-      const result = await pool.query(
-        `INSERT INTO users (first_name, last_name, email, password_hash, user_type, username, is_active, is_email_verified, created_by, create_date, update_date, gender, department, student_number)
-         VALUES ($1, $2, $3, $4, $5, $6, TRUE, TRUE, $7, NOW(), NOW(), $8, $9, $10) RETURNING id`,
-        [first_name, last_name, email, password_hash, role, username, createdBy, gender || null, department, student_number]
-      );
+      let result;
+      try {
+        result = await pool.query(
+          `INSERT INTO users (first_name, last_name, email, password_hash, user_type, username, is_active, is_email_verified, created_by, create_date, update_date, gender, department, student_number, faculty, class_year)
+           VALUES ($1, $2, $3, $4, $5, $6, TRUE, TRUE, $7, NOW(), NOW(), $8, $9, $10, $11, $12) RETURNING id`,
+          [first_name, last_name, email, password_hash, role, username, createdBy, gender || null, department, student_number,
+           faculty || null, class_year ? parseInt(class_year) : null]
+        );
+      } catch (colErr) {
+        // class_year kolonu henüz eklenmemişse faculty ile dene
+        if (colErr.message && colErr.message.includes('class_year')) {
+          result = await pool.query(
+            `INSERT INTO users (first_name, last_name, email, password_hash, user_type, username, is_active, is_email_verified, created_by, create_date, update_date, gender, department, student_number, faculty)
+             VALUES ($1, $2, $3, $4, $5, $6, TRUE, TRUE, $7, NOW(), NOW(), $8, $9, $10, $11) RETURNING id`,
+            [first_name, last_name, email, password_hash, role, username, createdBy, gender || null, department, student_number,
+             faculty || null]
+          );
+        } else {
+          throw colErr;
+        }
+      }
 
       const newUserId = result.rows[0].id;
 
@@ -138,7 +152,7 @@ router.post("/users",
         // user_roles veya roles tablosu yoksa sessizce geç
       }
 
-      // Öğrenci rolü: student_profiles kaydı oluştur (yalnızca user_id ile)
+      // Öğrenci rolü: student_profiles kaydı oluştur
       if (role === 'Öğrenci') {
         try {
           const existingProfile = await pool.query(
@@ -177,6 +191,18 @@ router.get("/users",
   authorizeRole("Yönetici", "Admin", "SuperAdmin"),
   async (req, res) => {
     try {
+      const sdReady = await usersReady();
+      const requesterRole = req.user.user_type;
+
+      // Gizleme kuralları:
+      //  - Yönetici rolüyse belek05 (Admin) ve Admin + SuperAdmin kullanıcıları gizlenir
+      //  - Admin/SuperAdmin rolüyse HERŞEYİ görebilir (kendi hesabı dahil)
+      const isAdmin = ['Admin', 'SuperAdmin'].includes(requesterRole);
+      const belek05Hide = isAdmin ? "" : "AND u.email NOT ILIKE 'belek05%'";
+      const adminHide   = (requesterRole === 'Yönetici')
+        ? "AND LOWER(COALESCE(r.name, u.user_type)) NOT IN ('admin', 'superadmin')"
+        : "";
+
       let result;
       try {
         result = await pool.query(`
@@ -191,6 +217,10 @@ router.get("/users",
           FROM public.users u
           LEFT JOIN public.user_roles ur ON ur.user_id = u.id
           LEFT JOIN public.roles r ON r.id = ur.role_id
+          WHERE 1=1
+            ${sdReady ? 'AND (u.is_deleted = FALSE OR u.is_deleted IS NULL)' : ''}
+            ${belek05Hide}
+            ${adminHide}
           ORDER BY
             CASE LOWER(COALESCE(r.name, u.user_type))
               WHEN 'yönetici' THEN 1 WHEN 'admin'    THEN 1 WHEN 'superadmin' THEN 1
@@ -204,9 +234,17 @@ router.get("/users",
         `);
       } catch (_) {
         // user_roles/roles tablosu yoksa düz sorgula
+        const adminHideFallback = (requesterRole === 'Yönetici')
+          ? "AND LOWER(user_type) NOT IN ('admin', 'superadmin')"
+          : "";
+        const belek05HideFallback = isAdmin ? '' : "AND email NOT ILIKE 'belek05%'";
         result = await pool.query(`
           SELECT id, first_name, last_name, email, username, is_active, user_type AS role
           FROM public.users
+          WHERE 1=1
+            ${sdReady ? 'AND (is_deleted = FALSE OR is_deleted IS NULL)' : ''}
+            ${belek05HideFallback}
+            ${adminHideFallback}
           ORDER BY
             CASE LOWER(user_type)
               WHEN 'yönetici' THEN 1 WHEN 'admin'    THEN 1 WHEN 'superadmin' THEN 1
@@ -239,6 +277,7 @@ router.get("/students",
   authorizeRole("Güvenlik", "Yönetici", "Admin", "SuperAdmin"),
   async (req, res) => {
     try {
+      const sdReady = await usersReady();
       const { gender, unassigned } = req.query;
 
       const params = [];
@@ -270,6 +309,8 @@ router.get("/students",
         LEFT JOIN rooms r             ON r.id = ra.room_id
         LEFT JOIN buildings b         ON b.id = r.building_id
         WHERE u.user_type = 'Öğrenci'
+          AND u.is_active = TRUE
+          ${sdReady ? 'AND (u.is_deleted = FALSE OR u.is_deleted IS NULL)' : ''}
           ${genderClause}
           ${unassignedClause}
         ORDER BY u.id DESC
@@ -360,22 +401,94 @@ router.delete("/departments/:id",
 
 // ------------------------------------
 // DELETE /admin/users/:id
-// Kullanıcıyı siler
+// Kullanıcıyı kalıcı olarak siler
 // ------------------------------------
 router.delete("/users/:id",
   authenticateToken,
   authorizeRole("Yönetici", "Admin", "SuperAdmin"),
   async (req, res) => {
-    const userId = req.params.id;
+    const userId = parseInt(req.params.id, 10);
+    if (isNaN(userId)) {
+      return res.status(400).json({ success: false, message: "Geçersiz kullanıcı ID" });
+    }
     try {
-      const check = await pool.query("SELECT id FROM users WHERE id = $1", [userId]);
+      const check = await pool.query("SELECT id, email FROM public.users WHERE id = $1", [userId]);
       if (check.rows.length === 0) {
         return res.status(404).json({ success: false, message: "Kullanıcı bulunamadı" });
       }
-      await pool.query("DELETE FROM users WHERE id = $1", [userId]);
-      res.json({ success: true, message: "Kullanıcı silindi" });
+      if (check.rows[0].email && check.rows[0].email.toLowerCase().startsWith('belek05')) {
+        return res.status(403).json({ success: false, message: "Bu kullanıcı silinemez." });
+      }
+
+      // Her sorgu bağımsız — hata verse de devam et (tablo yoksa önemli değil)
+      const cleanupQueries = [
+        ["UPDATE belek_dormitory_module.announcements        SET created_by   = NULL WHERE created_by   = $1", [userId]],
+        ["UPDATE belek_dormitory_module.maintenance_requests SET assigned_to  = NULL WHERE assigned_to  = $1", [userId]],
+        ["UPDATE belek_dormitory_module.maintenance_requests SET performed_by = NULL WHERE performed_by = $1", [userId]],
+        ["UPDATE belek_dormitory_module.entry_exit_logs      SET logged_by    = NULL WHERE logged_by    = $1", [userId]],
+        ["UPDATE belek_dormitory_module.room_assignments     SET assigned_by  = NULL WHERE assigned_by  = $1", [userId]],
+        ["UPDATE belek_dormitory_module.visitors             SET logged_by    = NULL WHERE logged_by    = $1", [userId]],
+        ["DELETE FROM public.user_roles                           WHERE user_id          = $1", [userId]],
+        ["DELETE FROM public.sessions                             WHERE user_id          = $1", [userId]],
+        ["DELETE FROM public.password_reset_tokens                WHERE platform_user_id = $1", [userId]],
+        ["DELETE FROM belek_dormitory_module.visitors             WHERE student_user_id  = $1", [userId]],
+        ["DELETE FROM belek_dormitory_module.notifications        WHERE user_id          = $1", [userId]],
+        ["DELETE FROM belek_dormitory_module.payments             WHERE user_id          = $1", [userId]],
+        ["DELETE FROM belek_dormitory_module.complaints           WHERE user_id          = $1", [userId]],
+        ["DELETE FROM belek_dormitory_module.leave_requests       WHERE user_id          = $1", [userId]],
+        ["DELETE FROM belek_dormitory_module.entry_exit_logs      WHERE user_id          = $1", [userId]],
+        ["DELETE FROM belek_dormitory_module.room_assignments     WHERE user_id          = $1", [userId]],
+        ["DELETE FROM belek_dormitory_module.student_profiles     WHERE user_id          = $1", [userId]],
+      ];
+
+      for (const [sql, params] of cleanupQueries) {
+        try { await pool.query(sql, params); } catch (_) { /* tablo yoksa geç */ }
+      }
+
+      const delResult = await pool.query("DELETE FROM public.users WHERE id = $1", [userId]);
+
+      if (delResult.rowCount > 0) {
+        // Kalıcı silme başarılı
+        return res.json({ success: true, message: "Kullanıcı silindi" });
+      }
+
+      // RLS politikası nedeniyle kalıcı silme engellendi — hesabı devre dışı bırak
+      const deactivate = await pool.query(
+        `UPDATE public.users SET is_active = false, update_date = NOW() WHERE id = $1`,
+        [userId]
+      );
+      if (deactivate.rowCount > 0) {
+        return res.json({ success: true, message: "Kullanıcı devre dışı bırakıldı" });
+      }
+
+      return res.status(500).json({ success: false, message: "Kullanıcı silinemedi. Veritabanı yetki kısıtlaması." });
     } catch (err) {
       console.error("Kullanıcı silme hatası:", err);
+      res.status(500).json({ success: false, message: "Sunucu hatası: " + err.message });
+    }
+  }
+);
+
+// ------------------------------------
+// POST /admin/users/:id/restore
+// Soft-delete edilmiş kullanıcıyı geri yükler
+// ------------------------------------
+router.post("/users/:id/restore",
+  authenticateToken,
+  authorizeRole("Yönetici", "Admin", "SuperAdmin"),
+  async (req, res) => {
+    const userId = parseInt(req.params.id, 10);
+    if (isNaN(userId)) {
+      return res.status(400).json({ success: false, message: "Geçersiz kullanıcı ID" });
+    }
+    try {
+      const affected = await softRestore(pool, "users", userId);
+      if (affected === 0) {
+        return res.status(404).json({ success: false, message: "Kullanıcı bulunamadı veya zaten aktif" });
+      }
+      res.json({ success: true, message: "Kullanıcı geri yüklendi" });
+    } catch (err) {
+      console.error("Kullanıcı geri yükleme hatası:", err);
       res.status(500).json({ success: false, message: "Sunucu hatası: " + err.message });
     }
   }
@@ -399,9 +512,13 @@ router.put("/users/:id/role",
     }
 
     try {
-      const check = await pool.query("SELECT id FROM users WHERE id = $1", [userId]);
+      const check = await pool.query("SELECT id, email FROM users WHERE id = $1", [userId]);
       if (check.rows.length === 0) {
         return res.status(404).json({ success: false, message: "Kullanıcı bulunamadı" });
+      }
+      // belek05 kullanıcısının rolü değiştirilemez
+      if (check.rows[0].email && check.rows[0].email.toLowerCase().startsWith('belek05')) {
+        return res.status(403).json({ success: false, message: "Bu kullanıcının rolü değiştirilemez." });
       }
       await pool.query("UPDATE users SET user_type = $1, update_date = NOW() WHERE id = $2", [newRole, userId]);
       res.json({ success: true, data: { newRole } });
@@ -439,6 +556,11 @@ router.patch("/users/:id/role",
       }
 
       const oldUser = check.rows[0];
+
+      // belek05 kullanıcısının rolü değiştirilemez
+      if (oldUser.email && oldUser.email.toLowerCase().startsWith('belek05')) {
+        return res.status(403).json({ success: false, message: "Bu kullanıcının rolü değiştirilemez." });
+      }
 
       // Aynı rol zaten atanmışsa
       if (oldUser.user_type === user_type) {
@@ -512,6 +634,11 @@ router.patch("/users/:id/reset-password",
 
       const oldUser = check.rows[0];
 
+      // belek05 kullanıcısının şifresi admin tarafından sıfırlanamaz
+      if (oldUser.email && oldUser.email.toLowerCase().startsWith('belek05')) {
+        return res.status(403).json({ success: false, message: "Bu kullanıcının şifresi yönetici tarafından değiştirilemez." });
+      }
+
       // Şifreyi güncelle — UPDATE yetkisi yoksa DELETE+INSERT workaround
       try {
         await pool.query(
@@ -574,25 +701,29 @@ router.put("/users/:id/password",
       }
 
       const oldUser = check.rows[0];
+
+      // belek05 kullanıcısının şifresi yönetici tarafından değiştirilemez
+      if (oldUser.email && oldUser.email.toLowerCase().startsWith('belek05')) {
+        return res.status(403).json({ success: false, message: "Bu kullanıcının şifresi yönetici tarafından değiştirilemez." });
+      }
+
       const newHash = await bcrypt.hash(newPassword, 10);
 
       try {
         await pool.query(
-          `UPDATE users SET password_hash = $1, update_date = NOW(),
-            password_changed_by = 'admin', password_changed_at = NOW(),
-            updated_by = $3 WHERE id = $2`,
-          [newHash, userId, req.user.id]
+          `UPDATE users SET password_hash = $1, update_date = NOW() WHERE id = $2`,
+          [newHash, userId]
         );
       } catch (updateErr) {
         if (updateErr.code === "42501") {
           try {
             await pool.query("DELETE FROM users WHERE id = $1", [userId]);
             await pool.query(
-              `INSERT INTO users (id, username, email, password_hash, first_name, last_name, user_type, is_active, create_date, update_date, password_changed_by, password_changed_at, updated_by)
+              `INSERT INTO users (id, username, email, password_hash, first_name, last_name, user_type, is_active, create_date, update_date)
                OVERRIDING SYSTEM VALUE
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW(), 'admin', NOW(), $9)`,
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())`,
               [userId, oldUser.username, oldUser.email, newHash,
-               oldUser.first_name, oldUser.last_name, oldUser.user_type, oldUser.is_active, req.user.id]
+               oldUser.first_name, oldUser.last_name, oldUser.user_type, oldUser.is_active]
             );
           } catch (deleteErr) {
             console.error("UPDATE ve DELETE yetkileri yok:", deleteErr.message);

@@ -56,6 +56,7 @@ const visitorRoutes      = require("./routes/visitorRoutes");      // Ziyaretçi
 const paymentRoutes      = require("./routes/paymentRoutes");      // Ödeme takibi
 const maintenanceRoutes  = require("./routes/maintenanceRoutes");  // Bakım & onarım
 const notificationRoutes = require("./routes/notificationRoutes"); // Bildirimler
+const cleaningRoutes     = require("./routes/cleaningRoutes");     // Temizlik & oda listeleri
 
 // ──────────────────────────────────────────────
 // 3. EXPRESS UYGULAMASINI OLUŞTUR
@@ -129,6 +130,13 @@ app.use("/api/visitors", visitorRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/maintenance", maintenanceRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/cleaning", cleaningRoutes);
+
+// ──────────────────────────────────────────────
+// RETENTION JOB — Süresi dolmuş soft-delete kayıtları temizler
+// announcements: 180 gün, complaints: 365 gün
+// ──────────────────────────────────────────────
+require("./jobs/cleanupJob");
 
 // ──────────────────────────────────────────────
 // 7. SUNUCUYU BAŞLAT

@@ -23,14 +23,15 @@ require("dotenv").config();
 // Bağlantı havuzu oluştur — tüm route dosyaları bunu kullanır
 // Parametreler .env dosyasından okunur, yoksa varsayılan değerler kullanılır
 const pool = new Pool({
-  user:     process.env.DB_USER     || "belek05",                                        // DB kullanıcı adı
-  host:     process.env.DB_HOST     || "ep-morning-math-ag237as9-pooler.c-2.eu-central-1.aws.neon.tech", // Neon sunucu adresi
-  database: process.env.DB_NAME     || "belekuni",                                              // Veritabanı adı
-  password: process.env.DB_PASSWORD || "Yusuf7005@2026",                                    // Veritabanı şifresi
-  port:     Number(process.env.DB_PORT) || 5432,                                              // PostgreSQL varsayılan port
-  ssl:      { rejectUnauthorized: false }, // Neon için SSL bağlantısı zorunlu
+  user:     process.env.DB_USER,                       // DB kullanıcı adı (.env'den okunur)
+  host:     process.env.DB_HOST,                       // Neon sunucu adresi (.env'den okunur)
+  database: process.env.DB_NAME,                       // Veritabanı adı (.env'den okunur)
+  password: process.env.DB_PASSWORD,                   // Veritabanı şifresi (.env'den okunur)
+  port:     Number(process.env.DB_PORT) || 5432,       // PostgreSQL varsayılan port
+  ssl:      { rejectUnauthorized: false },              // Neon için SSL bağlantısı zorunlu
 });
 
+//PostgreSQL’de: aynı DB içinde birden fazla “şema (schema)” olabilir
 pool.on('connect', (client) => {
   client.query('SET search_path TO belek_dormitory_module, belek_dormitory, public');
 });

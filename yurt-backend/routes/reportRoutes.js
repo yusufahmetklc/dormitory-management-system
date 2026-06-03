@@ -20,19 +20,19 @@ const router = express.Router();
 
 // ------------------------------------
 // GET /reports/dashboard
-// Genel dashboard istatistikleri (Yönetici)
-// Tüm modüllerden özet veriler
+// Genel dashboard istatistikleri (Tüm roller)
+// Her rol kendi istatistiklerini görebilir
 // ------------------------------------
 router.get("/dashboard",
   authenticateToken,
-  authorizeRole("Yönetici", "Admin", "SuperAdmin"),
+  authorizeRole("Yönetici", "Admin", "SuperAdmin", "Güvenlik", "Bakım", "Temizlik"),
   async (req, res) => {
     try {
       // Kullanıcı sayıları
       const userStats = await pool.query(`
         SELECT
-          COUNT(*) FILTER (WHERE user_type = 'Öğrenci') AS student_count,
-          COUNT(*) FILTER (WHERE user_type != 'Öğrenci') AS staff_count,
+          COUNT(*) FILTER (WHERE user_type = 'Öğrenci' AND is_active = TRUE) AS student_count,
+          COUNT(*) FILTER (WHERE user_type != 'Öğrenci' AND is_active = TRUE) AS staff_count,
           COUNT(*) AS total_users,
           COUNT(*) FILTER (WHERE is_active = TRUE) AS active_users
         FROM users
@@ -352,20 +352,20 @@ router.get("/student-demographics",
       let byFaculty = { rows: [] };
       try {
         byFaculty = await pool.query(`
-          SELECT sp.faculty, COUNT(*) AS count
-          FROM student_profiles sp JOIN users u ON sp.user_id = u.id
-          WHERE u.user_type = 'Öğrenci' AND u.is_active = TRUE AND sp.faculty IS NOT NULL
-          GROUP BY sp.faculty ORDER BY count DESC
+          SELECT u.faculty, COUNT(*) AS count
+          FROM public.users u
+          WHERE u.user_type = 'Öğrenci' AND u.is_active = TRUE AND u.faculty IS NOT NULL
+          GROUP BY u.faculty ORDER BY count DESC
         `);
       } catch {}
 
       let byClass = { rows: [] };
       try {
         byClass = await pool.query(`
-          SELECT sp.class_year, COUNT(*) AS count
-          FROM student_profiles sp JOIN users u ON sp.user_id = u.id
-          WHERE u.user_type = 'Öğrenci' AND u.is_active = TRUE AND sp.class_year IS NOT NULL
-          GROUP BY sp.class_year ORDER BY sp.class_year
+          SELECT u.class_year, COUNT(*) AS count
+          FROM public.users u
+          WHERE u.user_type = 'Öğrenci' AND u.is_active = TRUE AND u.class_year IS NOT NULL
+          GROUP BY u.class_year ORDER BY u.class_year
         `);
       } catch {}
 
@@ -610,7 +610,7 @@ router.get("/monthly-revenue",
     try {
       const months = Math.min(Math.max(parseInt(req.query.months) || 12, 1), 24);
 
-      // Ödendi statüsündeki ödemeleri ödeme tarihine göre ay bazlı grupla
+      // Ödendi statüsündeki ödemeleri güncelleme tarihine (veya oluşturma) göre ay bazlı grupla
       const paid = await pool.query(`
         SELECT
           TO_CHAR(DATE_TRUNC('month', COALESCE(updated_at, created_at)), 'YYYY-MM') AS month,
@@ -623,16 +623,16 @@ router.get("/monthly-revenue",
         ORDER BY month ASC
       `, [months]);
 
-      // Gecikmiş + bekleyen ödemeleri de ay bazlı grupla (borç analizi)
+      // Gecikmiş + bekleyen ödemeleri payment_date ay bazlı grupla
       const pending = await pool.query(`
         SELECT
-          TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM') AS month,
+          TO_CHAR(DATE_TRUNC('month', COALESCE(payment_date, created_at)), 'YYYY-MM') AS month,
           COALESCE(SUM(amount), 0)::NUMERIC AS amount,
           COUNT(*) AS count
         FROM payments
         WHERE status IN ('Beklemede', 'Gecikmiş')
-          AND created_at >= DATE_TRUNC('month', CURRENT_DATE) - ($1 - 1) * INTERVAL '1 month'
-        GROUP BY DATE_TRUNC('month', created_at)
+          AND COALESCE(payment_date, created_at) >= DATE_TRUNC('month', CURRENT_DATE) - ($1 - 1) * INTERVAL '1 month'
+        GROUP BY DATE_TRUNC('month', COALESCE(payment_date, created_at))
         ORDER BY month ASC
       `, [months]);
 
@@ -702,7 +702,7 @@ router.get("/payment-analytics",
       `);
 
       // ── 2. Gecikmiş / vadesi geçmiş ödeme listesi ──────────────────
-      // status='Gecikmiş' VEYA (status='Beklemede' AND due_date < bugün)
+      // status='Gecikmiş' VEYA (status='Beklemede' AND payment_date < bugün)
       const latePayments = await pool.query(`
         SELECT
           u.id            AS user_id,
@@ -712,62 +712,75 @@ router.get("/payment-analytics",
           p.id            AS payment_id,
           p.amount,
           p.status,
-          p.due_date,
-          p.period_month,
-          p.period_year,
-          p.payment_type,
+          p.payment_date  AS due_date,
+          EXTRACT(MONTH FROM p.payment_date)::INTEGER AS period_month,
+          EXTRACT(YEAR  FROM p.payment_date)::INTEGER AS period_year,
+          p.description   AS payment_type,
           CASE
-            WHEN p.due_date IS NOT NULL THEN (CURRENT_DATE - p.due_date)::INTEGER
+            WHEN p.payment_date IS NOT NULL THEN (CURRENT_DATE - p.payment_date::DATE)::INTEGER
             ELSE NULL
           END             AS days_overdue
         FROM payments p
         JOIN users u ON u.id = p.user_id
         WHERE p.status = 'Gecikmiş'
-           OR (p.status = 'Beklemede' AND p.due_date IS NOT NULL AND p.due_date < CURRENT_DATE)
+           OR (p.status = 'Beklemede' AND p.payment_date IS NOT NULL AND p.payment_date::DATE < CURRENT_DATE)
         ORDER BY days_overdue DESC NULLS LAST, p.amount DESC
         LIMIT 50
       `);
 
-      // ── 3. Dönem bazlı toplam (son 12 dönem, period_year/period_month) ─
+      // ── 3. Dönem bazlı toplam — son 12 ay, payment_date bazlı grupla ──
       const byPeriod = await pool.query(`
         SELECT
-          period_year,
-          period_month,
+          EXTRACT(YEAR  FROM payment_date)::INTEGER AS period_year,
+          EXTRACT(MONTH FROM payment_date)::INTEGER AS period_month,
           COALESCE(SUM(amount) FILTER (WHERE status = 'Ödendi'),    0)::NUMERIC AS collected,
           COALESCE(SUM(amount) FILTER (WHERE status = 'Beklemede'), 0)::NUMERIC AS pending,
           COALESCE(SUM(amount) FILTER (WHERE status = 'Gecikmiş'),  0)::NUMERIC AS overdue,
           COUNT(*) FILTER (WHERE status = 'Ödendi')                  AS paid_count,
           COUNT(*) FILTER (WHERE status IN ('Beklemede','Gecikmiş')) AS unpaid_count
         FROM payments
-        WHERE period_year  IS NOT NULL
-          AND period_month IS NOT NULL
-          AND period_year >= EXTRACT(YEAR FROM CURRENT_DATE)::INTEGER - 1
-        GROUP BY period_year, period_month
+        WHERE payment_date IS NOT NULL
+          AND payment_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+          AND payment_date <  DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+        GROUP BY EXTRACT(YEAR FROM payment_date), EXTRACT(MONTH FROM payment_date)
         ORDER BY period_year DESC, period_month DESC
         LIMIT 12
       `);
 
-      // ── 4. Ödeme yöntemi dağılımı (sadece Ödendi) ──────────────────
+      // ── 4. Ödeme yöntemi dağılımı — description'dan çıkar ──────────
       const byMethod = await pool.query(`
         SELECT
-          payment_method,
-          COUNT(*)                          AS count,
-          COALESCE(SUM(amount), 0)::NUMERIC AS total
+          CASE
+            WHEN description ILIKE '%nakit%'    THEN 'Nakit'
+            WHEN description ILIKE '%kredi%'    THEN 'Kredi Kartı'
+            WHEN description ILIKE '%havale%'   THEN 'Havale/EFT'
+            WHEN description ILIKE '%banka%'    THEN 'Havale/EFT'
+            WHEN description ILIKE '%online%'   THEN 'Online'
+            ELSE 'Diğer'
+          END                                   AS payment_method,
+          COUNT(*)                              AS count,
+          COALESCE(SUM(amount), 0)::NUMERIC     AS total
         FROM payments
-        WHERE status = 'Ödendi' AND payment_method IS NOT NULL
-        GROUP BY payment_method
+        WHERE status = 'Ödendi'
+        GROUP BY 1
         ORDER BY total DESC
       `);
 
-      // ── 5. Ödeme tipi dağılımı (tüm kayıtlar) ──────────────────────
+      // ── 5. Ödeme tipi dağılımı — description'dan çıkar ─────────────
       const byType = await pool.query(`
         SELECT
-          payment_type,
-          COUNT(*)                          AS count,
-          COALESCE(SUM(amount), 0)::NUMERIC AS total
+          CASE
+            WHEN description ILIKE '%aylık%'  THEN 'Aylık'
+            WHEN description ILIKE '%yıllık%' THEN 'Yıllık'
+            WHEN description ILIKE '%depozit%'THEN 'Depozit'
+            WHEN description ILIKE '%kira%'   THEN 'Kira'
+            ELSE 'Diğer'
+          END                                   AS payment_type,
+          COUNT(*)                              AS count,
+          COALESCE(SUM(amount), 0)::NUMERIC     AS total
         FROM payments
-        WHERE payment_type IS NOT NULL
-        GROUP BY payment_type
+        WHERE description IS NOT NULL
+        GROUP BY 1
         ORDER BY total DESC
       `);
 
@@ -778,11 +791,11 @@ router.get("/payment-analytics",
           COALESCE(SUM(amount), 0)::NUMERIC AS late_amount,
           COUNT(DISTINCT user_id)           AS late_student_count,
           COALESCE(AVG(
-            CASE WHEN due_date IS NOT NULL THEN (CURRENT_DATE - due_date)::NUMERIC END
+            CASE WHEN payment_date IS NOT NULL THEN (CURRENT_DATE - payment_date::DATE)::NUMERIC END
           ), 0)::NUMERIC                    AS avg_days_late
         FROM payments
         WHERE status = 'Gecikmiş'
-           OR (status = 'Beklemede' AND due_date IS NOT NULL AND due_date < CURRENT_DATE)
+           OR (status = 'Beklemede' AND payment_date IS NOT NULL AND payment_date::DATE < CURRENT_DATE)
       `);
 
       res.json({

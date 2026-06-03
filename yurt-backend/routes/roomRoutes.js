@@ -14,6 +14,7 @@
 const express = require("express");
 const pool = require("../config/db");
 const { authenticateToken, authorizeRole } = require("../middleware/auth");
+const { softRestore } = require("../middleware/softDelete");
 
 const router = express.Router();
 
@@ -589,15 +590,46 @@ router.delete("/:id",
         });
       }
 
-      // Soft-delete
+      // Soft-delete: is_active + is_deleted alanlarını güncelle
       await pool.query(
-        'UPDATE rooms SET is_active = FALSE, updated_at = NOW() WHERE id = $1',
-        [roomId]
+        'UPDATE rooms SET is_active = FALSE, is_deleted = TRUE, deleted_at = NOW(), deleted_by = $1, updated_at = NOW() WHERE id = $2',
+        [req.user.id, roomId]
       );
 
       res.json({ success: true, message: "Oda silindi" });
     } catch (err) {
       console.error("Oda silme hatası:", err);
+      res.status(500).json({ success: false, message: "Sunucu hatası" });
+    }
+  }
+);
+
+// ------------------------------------
+// POST /rooms/:id/restore
+// Soft-delete edilmiş odayı geri yükler (Sadece Yönetici)
+// ------------------------------------
+router.post("/:id/restore",
+  authenticateToken,
+  authorizeRole("Yönetici", "Admin", "SuperAdmin"),
+  async (req, res) => {
+    const roomId = parseInt(req.params.id, 10);
+    if (isNaN(roomId)) {
+      return res.status(400).json({ success: false, message: "Geçersiz oda ID" });
+    }
+    try {
+      const result = await pool.query(
+        `UPDATE rooms
+         SET is_active = TRUE, is_deleted = FALSE, deleted_at = NULL, deleted_by = NULL, updated_at = NOW()
+         WHERE id = $1 AND is_deleted = TRUE
+         RETURNING id`,
+        [roomId]
+      );
+      if (result.rowCount === 0) {
+        return res.status(404).json({ success: false, message: "Oda bulunamadı veya zaten aktif" });
+      }
+      res.json({ success: true, message: "Oda geri yüklendi" });
+    } catch (err) {
+      console.error("Oda geri yükleme hatası:", err);
       res.status(500).json({ success: false, message: "Sunucu hatası" });
     }
   }

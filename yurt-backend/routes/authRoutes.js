@@ -137,8 +137,7 @@ router.post("/change-password", authenticateToken, async (req, res) => {
     // Yeni şifreyi hashle ve güncelle
     const newHash = await bcrypt.hash(newPassword, 10);
     await pool.query(
-      `UPDATE users SET password_hash = $1, update_date = NOW(),
-        password_changed_by = 'self', password_changed_at = NOW() WHERE id = $2`,
+      `UPDATE users SET password_hash = $1, update_date = NOW() WHERE id = $2`,
       [newHash, user.id]
     );
 

@@ -16,6 +16,8 @@
 const express = require("express");
 const pool = require("../config/db");
 const { authenticateToken, authorizeRole } = require("../middleware/auth");
+const { softDelete, softRestore } = require("../middleware/softDelete");
+const { announcementsReady } = require("../middleware/softDeleteReady");
 
 const router = express.Router();
 
@@ -68,11 +70,13 @@ router.get("/all",
   authorizeRole("Yönetici", "Admin", "SuperAdmin"),
   async (req, res) => {
     try {
+      const sdReady = await announcementsReady();
       const result = await pool.query(`
         SELECT a.id, a.title, a.content, a.created_at,
                u.first_name AS author_first_name, u.last_name AS author_last_name
         FROM announcements a
         LEFT JOIN users u ON a.created_by = u.id
+        ${sdReady ? 'WHERE a.is_deleted = FALSE' : ''}
         ORDER BY a.created_at DESC
       `);
       res.json({ success: true, data: result.rows.map(parseAnn) });
@@ -90,11 +94,13 @@ router.get("/all",
 // ------------------------------------
 router.get("/", authenticateToken, async (req, res) => {
   try {
+    const sdReady = await announcementsReady();
     const result = await pool.query(`
       SELECT a.id, a.title, a.content, a.created_at,
              u.first_name AS author_first_name, u.last_name AS author_last_name
       FROM announcements a
       LEFT JOIN users u ON a.created_by = u.id
+      ${sdReady ? 'WHERE a.is_deleted = FALSE' : ''}
       ORDER BY a.created_at DESC
     `);
 
@@ -162,17 +168,54 @@ router.post("/",
 
 // ------------------------------------
 // DELETE /announcements/:id
-// Duyuruyu kalıcı olarak siler (Yönetici)
+// Duyuruyu soft-delete yapar (Yönetici)
 // ------------------------------------
 router.delete("/:id",
   authenticateToken,
   authorizeRole("Yönetici", "Admin", "SuperAdmin"),
   async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ success: false, message: "Geçersiz duyuru ID" });
+    }
     try {
-      await pool.query("DELETE FROM announcements WHERE id = $1", [req.params.id]);
+      const affected = await softDelete(pool, "announcements", id, req.user.id);
+      if (affected === 0) {
+        return res.status(404).json({ success: false, message: "Duyuru bulunamadı" });
+      }
       res.json({ success: true, message: "Duyuru kaldırıldı" });
     } catch (err) {
+      if (err.code === '42703') {
+        // is_deleted kolonu henüz yok, geçici hard delete
+        await pool.query("DELETE FROM announcements WHERE id = $1", [id]);
+        return res.json({ success: true, message: "Duyuru kaldırıldı" });
+      }
       console.error("Duyuru silme hatası:", err.message);
+      res.status(500).json({ success: false, message: "Sunucu hatası" });
+    }
+  }
+);
+
+// ------------------------------------
+// POST /announcements/:id/restore
+// Soft-delete edilmiş duyuruyu geri yükler (Yönetici)
+// ------------------------------------
+router.post("/:id/restore",
+  authenticateToken,
+  authorizeRole("Yönetici", "Admin", "SuperAdmin"),
+  async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ success: false, message: "Geçersiz duyuru ID" });
+    }
+    try {
+      const affected = await softRestore(pool, "announcements", id);
+      if (affected === 0) {
+        return res.status(404).json({ success: false, message: "Duyuru bulunamadı veya zaten aktif" });
+      }
+      res.json({ success: true, message: "Duyuru geri yüklendi" });
+    } catch (err) {
+      console.error("Duyuru geri yükleme hatası:", err.message);
       res.status(500).json({ success: false, message: "Sunucu hatası" });
     }
   }
