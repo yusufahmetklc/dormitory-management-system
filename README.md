@@ -90,36 +90,118 @@ dormitory-management-system/
 
 ---
 
-## Kurulum
+## Kurulum ve Çalıştırma
 
 ### Gereksinimler
 
-- Node.js v18+
-- PostgreSQL (veya Neon Cloud hesabı)
+- [Node.js](https://nodejs.org/) v18 veya üzeri
+- PostgreSQL veritabanı (yerel kurulum **ya da** [Neon Cloud](https://neon.tech) ücretsiz hesabı)
+- Git
 
-### Adımlar
+---
+
+### 1. Repoyu Klonla
 
 ```bash
-# 1. Repoyu klonla
 git clone https://github.com/yusufahmetklc/dormitory-management-system.git
-cd dormitory-management-system/yurt-backend
+cd dormitory-management-system
+```
 
-# 2. Bağımlılıkları yükle
+---
+
+### 2. Bağımlılıkları Yükle
+
+```bash
+cd yurt-backend
 npm install
+```
 
-# 3. Ortam değişkenlerini ayarla
+---
+
+### 3. Ortam Değişkenlerini Ayarla
+
+`yurt-backend/` klasörü içinde `.env.example` dosyasını kopyalayarak `.env` oluşturun:
+
+```bash
+# Windows (PowerShell)
+copy .env.example .env
+
+# macOS / Linux
 cp .env.example .env
-# .env dosyasını açıp kendi veritabanı ve SMTP bilgilerinizi girin
+```
 
-# 4. Veritabanı şemalarını uygula (sırayla)
-# migrations/ klasöründeki .sql dosyalarını veritabanınıza çalıştırın
+Ardından `.env` dosyasını bir metin editörüyle açıp aşağıdaki alanları doldurun:
 
-# 5. Sunucuyu başlat
+```env
+DB_HOST=<veritabanı sunucu adresi>
+DB_PORT=5432
+DB_USER=<veritabanı kullanıcı adı>
+DB_PASSWORD=<veritabanı şifresi>
+DB_NAME=<veritabanı adı>
+
+JWT_SECRET=<rastgele uzun bir gizli anahtar>
+
+SMTP_HOST=<smtp sunucu adresi>
+SMTP_PORT=2525
+SMTP_USER=<smtp kullanıcı adı>
+SMTP_PASS=<smtp şifresi>
+
+PORT=3000
+APP_HOST=0.0.0.0
+APP_BASE_URL=http://localhost:3000
+```
+
+> **Not:** `.env` dosyası `.gitignore`'a eklenmiştir ve asla GitHub'a gönderilmez.
+
+---
+
+### 4. Veritabanı Şemalarını Uygula
+
+`yurt-backend/migrations/` klasöründeki SQL dosyalarını **sırayla** veritabanınıza uygulayın:
+
+```bash
+# psql ile (yerel PostgreSQL)
+psql -U <kullanıcı_adı> -d <veritabanı_adı> -f migrations/001_student_module.sql
+psql -U <kullanıcı_adı> -d <veritabanı_adı> -f migrations/002_enhanced_student_module.sql
+# ... 015'e kadar tüm dosyaları sırayla çalıştırın
+```
+
+Neon Cloud kullanıyorsanız SQL içeriklerini Neon'un web arayüzündeki **SQL Editor**'a yapıştırarak çalıştırabilirsiniz.
+
+---
+
+### 5. Sunucuyu Başlat
+
+```bash
+# yurt-backend/ klasöründeyken:
 npm start
 ```
 
-Sunucu varsayılan olarak `http://localhost:3000` adresinde çalışır.  
-Frontend dosyaları `yurt-frontend/` klasöründe yer alır ve Express tarafından statik olarak sunulur.
+Sunucu başarıyla çalışırsa terminalde şu mesajı görürsünüz:
+
+```
+Server running on http://localhost:3000
+```
+
+---
+
+### 6. Uygulamaya Eriş
+
+Tarayıcınızda aşağıdaki adresi açın:
+
+```
+http://localhost:3000
+```
+
+Giriş sayfası (`index.html`) açılacaktır. Rol seçerek sisteme giriş yapabilirsiniz:
+
+| Rol | Panel |
+|---|---|
+| Yönetici (Admin) | `/admin-panel.html` |
+| Öğrenci | `/student-panel.html` |
+| Temizlik Personeli | `/cleaning-panel.html` |
+| Bakım Personeli | `/maintenance-panel.html` |
+| Güvenlik | `/security-panel.html` |
 
 ---
 
